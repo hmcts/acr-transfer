@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+
+# Virtual environments
+venv/
+.env/
+.envrc
+
+# Test output
+*.log
+*.out
+*.tmp
+*.bak
+*.swp
+*.swo
+*.coverage
+.coverage.*
+htmlcov/
+.tox/
+.pytest_cache/
+test-output.xml
+
+# Ignore config
+ignore-repos.json
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Pipenv
+Pipfile.lock
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# Other editors
+.idea/
+
+# Node (if present)
+node_modules/
+
+# Misc
+*.sqlite3
+*.db
+*.log
+*.pid
+*.seed
+*.orig
+*.rej
+
+# System
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+
+# Coverage
+coverage.xml
+
+# Jupyter
+.ipynb_checkpoints/

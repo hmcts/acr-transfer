@@ -1,0 +1,84 @@
+trigger: none
+pr: none
+
+parameters:
+  - name: environmentServiceConnection
+    displayName: Azure service connection
+    type: string
+  - name: sourceRegistryName
+    displayName: Source registry name
+    type: string
+  - name: targetRegistryName
+    displayName: Target registry name
+    type: string
+  - name: singleRepository
+    displayName: Optional single repository to transfer
+    type: string
+    default: '__unset__'
+  - name: letterFilters
+    displayName: "Optional letter filters (for example: a-c,e)"
+    type: string
+    default: '__unset__'
+  - name: maxRepositories
+    displayName: Maximum repositories to process this run (0 = unlimited)
+    type: number
+    default: 5
+  - name: delaySeconds
+    displayName: Delay in seconds between imports
+    type: number
+    default: 10
+  - name: dryRun
+    displayName: Report actions without importing artifacts
+    type: boolean
+    default: true
+  - name: forceOverwrite
+    displayName: Force overwrite of existing tags in target registry
+    type: boolean
+    default: false
+
+stages:
+  - stage: Transfer
+    displayName: Transfer selected ACR artifacts
+    jobs:
+      - job: Transfer
+        displayName: Run transfer helper
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - checkout: self
+
+          - task: AzureCLI@2
+            displayName: Execute transfer script
+            inputs:
+              azureSubscription: $(parameters.environmentServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                cd "$(System.DefaultWorkingDirectory)"
+
+                args=(
+                  "--source-registry-name" "$(parameters.sourceRegistryName)"
+                  "--target-registry-name" "$(parameters.targetRegistryName)"
+                  "--max-repositories" "$(parameters.maxRepositories)"
+                  "--delay-seconds" "$(parameters.delaySeconds)"
+                )
+
+                if [ "$(parameters.singleRepository)" != "__unset__" ]; then
+                  args+=("--repository" "$(parameters.singleRepository)")
+                fi
+
+                if [ "$(parameters.letterFilters)" != "__unset__" ]; then
+                  args+=("--letters" "$(parameters.letterFilters)")
+                fi
+
+                if [ "$(parameters.forceOverwrite)" = "true" ] || [ "$(parameters.forceOverwrite)" = "True" ]; then
+                  args+=("--force")
+                fi
+
+                if [ "$(parameters.dryRun)" = "true" ] || [ "$(parameters.dryRun)" = "True" ]; then
+                  args+=("--dry-run")
+                fi
+
+                echo "Running transfer helper with arguments: ${args[*]}"
+                python3 scripts/acr_transfer.py "${args[@]}"
