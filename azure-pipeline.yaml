@@ -1,16 +1,16 @@
-trigger: none
+
+trigger:
+  - master
 pr: none
 
 parameters:
-  - name: environmentServiceConnection
-    displayName: Azure service connection
+  - name: environment
+    displayName: Environment
     type: string
-  - name: sourceRegistryName
-    displayName: Source registry name
-    type: string
-  - name: targetRegistryName
-    displayName: Target registry name
-    type: string
+    default: sbox
+    values:
+      - prod
+      - sbox
   - name: singleRepository
     displayName: Optional single repository to transfer
     type: string
@@ -36,21 +36,31 @@ parameters:
     type: boolean
     default: false
 
+variables:
+  ${{ if eq(parameters.environment, 'prod') }}:
+    sourceacrName: hmctspublic.azurecr.io
+    targetacrName: hmctsprod.azurecr.io
+    serviceConnection: DCD-CNP-PROD
+  ${{ if eq(parameters.environment, 'sbox') }}:
+    sourceacrName: hmctssandbox.azurecr.io
+    targetacrName: hmctssbox.azurecr.io
+    serviceConnection: DCD-CFT-Sandbox
+
 stages:
-  - stage: Transfer
-    displayName: Transfer selected ACR artifacts
+  - stage: Migrate
+    displayName: Migrate selected ACR artifacts
     jobs:
-      - job: Transfer
-        displayName: Run transfer helper
+      - job: Migrate
+        displayName: "Run Migrate ACR Script - $(sourceacrName) to $(targetacrName)"
         pool:
-          vmImage: ubuntu-latest
+          name: hmcts-cftptl-agent-pool
         steps:
           - checkout: self
 
           - task: AzureCLI@2
-            displayName: Execute transfer script
+            displayName: Execute migration script
             inputs:
-              azureSubscription: $(parameters.environmentServiceConnection)
+              azureSubscription: $(serviceConnection)
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |
@@ -58,8 +68,8 @@ stages:
                 cd "$(System.DefaultWorkingDirectory)"
 
                 args=(
-                  "--source-registry-name" "$(parameters.sourceRegistryName)"
-                  "--target-registry-name" "$(parameters.targetRegistryName)"
+                  "--source-registry-name" "$(sourceacrName)"
+                  "--target-registry-name" "$(targetacrName)"
                   "--max-repositories" "$(parameters.maxRepositories)"
                   "--delay-seconds" "$(parameters.delaySeconds)"
                 )
@@ -80,5 +90,5 @@ stages:
                   args+=("--dry-run")
                 fi
 
-                echo "Running transfer helper with arguments: ${args[*]}"
+                echo "Running migration helper with arguments: ${args[*]}"
                 python3 scripts/acr_transfer.py "${args[@]}"
