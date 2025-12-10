@@ -1,5 +1,5 @@
 
-name: 'ACR-Migrate-$(Build.SourceBranchName)-${{ parameters.environment }}-$(sourceacrName)-to-$(targetacrName)-$(Date:yyyyMMdd)$(Rev:.r)'
+name: 'ACR-Migrate--$(sourceacrName)--to--$(targetacrName)--$(Date:yyyyMMdd)$(Rev:.r)'
 trigger:
   - master
 pr: none
