@@ -94,4 +94,4 @@ stages:
                 fi
 
                 echo "Running migration helper with arguments: ${args[*]}"
-                python3 scripts/acr_transfer.py "${args[@]}"
+                python3 -u scripts/acr_transfer.py "${args[@]}"
