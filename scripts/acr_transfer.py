@@ -118,12 +118,21 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         repositories = [args.repository]
         _log("=== Repository selection summary ===")
         _log(f"Single repository specified: {args.repository}")
+        # Debug output removed
         try:
             tags = _list_tags(args.source_registry_name, args.repository)
-            target_tags = _list_tags(args.target_registry_name, args.repository)
-        except AzCliError:
+        except AzCliError as error:
+            _log(f"[ERROR] Failed to list tags for '{args.repository}' in source: {error}", "red")
             tags = []
-            target_tags = []
+        try:
+            target_tags = _list_tags(args.target_registry_name, args.repository)
+        except AzCliError as error:
+            stderr_lower = str(error.stderr).lower()
+            if "repositorynotfound" in stderr_lower or "not found" in stderr_lower:
+                target_tags = []
+            else:
+                _log(f"[ERROR] Failed to list tags for '{args.repository}' in target: {error}", "red")
+                target_tags = []
         target_tag_set = set(target_tags)
         if args.force:
             tags_to_process = list(tags)

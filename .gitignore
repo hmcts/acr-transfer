@@ -27,9 +27,6 @@ htmlcov/
 .pytest_cache/
 test-output.xml
 
-# Ignore config
-ignore-repos.json
-
 # VS Code
 .vscode/
 

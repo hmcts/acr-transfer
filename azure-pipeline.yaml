@@ -37,6 +37,15 @@ parameters:
     type: boolean
     default: false
 
+  - name: ignorePattern
+    displayName: Optional ignore pattern(s) (comma-separated or repeated)
+    type: string
+    default: '__unset__'
+  - name: ignoreConfig
+    displayName: Optional ignore config file path
+    type: string
+    default: '__unset__'
+
 variables:
   ${{ if eq(parameters.environment, 'prod') }}:
     sourceacrName: hmctspublic.azurecr.io
@@ -75,6 +84,13 @@ stages:
                   "--max-repositories" "${{ parameters.maxRepositories }}"
                   "--delay-seconds" "${{ parameters.delaySeconds }}"
                 )
+
+                if [ "${{ parameters.ignorePattern }}" != "__unset__" ]; then
+                  args+=("--ignore-pattern" "${{ parameters.ignorePattern }}")
+                fi
+                if [ "${{ parameters.ignoreConfig }}" != "__unset__" ]; then
+                  args+=("--ignore-config" "${{ parameters.ignoreConfig }}")
+                fi
 
 
                 if [ "${{ parameters.singleRepository }}" != "__unset__" ]; then
