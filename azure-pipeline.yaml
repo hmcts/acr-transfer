@@ -75,19 +75,20 @@ stages:
                   "--delay-seconds" "${{ parameters.delaySeconds }}"
                 )
 
-                if [ "$(parameters.singleRepository)" != "__unset__" ]; then
-                  args+=("--repository" "$(parameters.singleRepository)")
+
+                if [ "${{ parameters.singleRepository }}" != "__unset__" ]; then
+                  args+=("--repository" "${{ parameters.singleRepository }}")
                 fi
 
-                if [ "$(parameters.letterFilters)" != "__unset__" ]; then
-                  args+=("--letters" "$(parameters.letterFilters)")
+                if [ "${{ parameters.letterFilters }}" != "__unset__" ]; then
+                  args+=("--letters" "${{ parameters.letterFilters }}")
                 fi
 
-                if [ "$(parameters.forceOverwrite)" = "true" ] || [ "$(parameters.forceOverwrite)" = "True" ]; then
+                if [ "${{ parameters.forceOverwrite }}" = "true" ] || [ "${{ parameters.forceOverwrite }}" = "True" ]; then
                   args+=("--force")
                 fi
 
-                if [ "$(parameters.dryRun)" = "true" ] || [ "$(parameters.dryRun)" = "True" ]; then
+                if [ "${{ parameters.dryRun }}" = "true" ] || [ "${{ parameters.dryRun }}" = "True" ]; then
                   args+=("--dry-run")
                 fi
 
