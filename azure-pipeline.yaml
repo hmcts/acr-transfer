@@ -51,7 +51,7 @@ stages:
     displayName: Migrate selected ACR artifacts
     jobs:
       - job: Migrate
-        displayName: "Run Migrate ACR Script - $(sourceacrName) to $(targetacrName)"
+        displayName: "Run Migrate ACR Script - ${{ variables.sourceacrName }} to ${{ variables.targetacrName }}"
         pool:
           name: hmcts-cftptl-agent-pool
         steps:
@@ -67,11 +67,12 @@ stages:
                 set -euo pipefail
                 cd "$(System.DefaultWorkingDirectory)"
 
+
                 args=(
                   "--source-registry-name" "$(sourceacrName)"
                   "--target-registry-name" "$(targetacrName)"
-                  "--max-repositories" "$(parameters.maxRepositories)"
-                  "--delay-seconds" "$(parameters.delaySeconds)"
+                  "--max-repositories" "${{ parameters.maxRepositories }}"
+                  "--delay-seconds" "${{ parameters.delaySeconds }}"
                 )
 
                 if [ "$(parameters.singleRepository)" != "__unset__" ]; then
