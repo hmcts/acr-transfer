@@ -28,11 +28,11 @@ parameters:
     type: number
     default: 10
   - name: dryRun
-    displayName: Report actions without importing artifacts
+    displayName: Dry-run - Report actions without importing artifacts
     type: boolean
     default: true
   - name: forceOverwrite
-    displayName: Force overwrite of existing tags in target registry
+    displayName: Overwrite - Force overwrite of existing tags in target registry
     type: boolean
     default: false
 
