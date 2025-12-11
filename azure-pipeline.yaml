@@ -1,0 +1,131 @@
+
+name: 'ACR-Migrate-$(sourceacrName)-TO-$(targetacrName)-$(Date:yyyyMMdd)$(Rev:.r)'
+trigger:
+  - master
+pr: none
+
+parameters:
+  - name: environment
+    displayName: Environment
+    type: string
+    default: sbox
+    values:
+      - prod
+      - sbox
+  - name: platform
+    displayName: Platform
+    type: string
+    default: cft
+    values:
+      - cft
+      - sds
+  - name: singleRepository
+    displayName: Optional single repository to transfer
+    type: string
+    default: '__unset__'
+  - name: letterFilters
+    displayName: "Optional letter filters (for example: a-c,e)"
+    type: string
+    default: '__unset__'
+  - name: maxRepositories
+    displayName: Maximum repositories to process this run (0 = unlimited)
+    type: number
+    default: 5
+  - name: delaySeconds
+    displayName: Delay in seconds between imports
+    type: number
+    default: 10
+  - name: dryRun
+    displayName: Dry-run - Report actions without importing artifacts
+    type: boolean
+    default: true
+  - name: forceOverwrite
+    displayName: Overwrite - Force overwrite of existing tags in target registry
+    type: boolean
+    default: false
+  - name: ignorePattern
+    displayName: Optional ignore pattern(s) (comma-separated or repeated)
+    type: string
+    default: '__unset__'
+  - name: ignoreConfig
+    displayName: Optional ignore config file path
+    type: string
+    default: '__unset__'
+
+variables:
+  ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'cft')) }}:
+    sourceacrName: hmctspublic.azurecr.io
+    targetacrName: hmctsprod.azurecr.io
+    targetServiceConnection: DCD-CNP-PROD
+    sourceServiceConnection: DCD-CNP-PROD
+  ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'sds')) }}:
+    sourceacrName: sdshmctspublic.azurecr.io
+    targetacrName: hmctsprod.azurecr.io
+    targetServiceConnection: DCD-CNP-PROD
+    sourceServiceConnection: DTS-SHAREDSERVICES-PROD
+  ${{ if and(eq(parameters.environment, 'sbox'), eq(parameters.platform, 'cft')) }}:
+    sourceacrName: hmctssandbox.azurecr.io
+    targetacrName: hmctssbox.azurecr.io
+    targetServiceConnection: DCD-CFT-Sandbox
+    sourceServiceConnection: DCD-CFT-Sandbox
+  ${{ if and(eq(parameters.environment, 'sbox'), eq(parameters.platform, 'sds')) }}:
+    sourceacrName: sdshmctspublicsbox.azurecr.io
+    targetacrName: hmctssbox.azurecr.io
+    targetServiceConnection: DCD-CFT-Sandbox
+    sourceServiceConnection: DTS-SHAREDSERVICES-SBOX
+
+stages:
+  - stage: Migrate
+    displayName: Migrate selected ACR artifacts
+    jobs:
+      - job: Migrate
+        displayName: "Run Migrate ACR Script - ${{ variables.sourceacrName }} to ${{ variables.targetacrName }}"
+        pool:
+          name: hmcts-cftptl-agent-pool
+        steps:
+          - checkout: self
+
+          - task: AzureCLI@2
+            displayName: Execute migration script
+            inputs:
+              azureSubscription: $(targetServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                cd "$(System.DefaultWorkingDirectory)"
+
+                args=(
+                  "--source-registry-name" "$(sourceacrName)"
+                  "--source-subscription-id" "$(sourceServiceConnection)"
+                  "--target-registry-name" "$(targetacrName)"
+                  "--target-subscription-id" "$(targetServiceConnection)"
+                  "--max-repositories" "${{ parameters.maxRepositories }}"
+                  "--delay-seconds" "${{ parameters.delaySeconds }}"
+                )
+
+                if [ "${{ parameters.ignorePattern }}" != "__unset__" ]; then
+                  args+=("--ignore-pattern" "${{ parameters.ignorePattern }}")
+                fi
+                if [ "${{ parameters.ignoreConfig }}" != "__unset__" ]; then
+                  args+=("--ignore-config" "${{ parameters.ignoreConfig }}")
+                fi
+
+                if [ "${{ parameters.singleRepository }}" != "__unset__" ]; then
+                  args+=("--repository" "${{ parameters.singleRepository }}")
+                fi
+
+                if [ "${{ parameters.letterFilters }}" != "__unset__" ]; then
+                  args+=("--letters" "${{ parameters.letterFilters }}")
+                fi
+
+                if [ "${{ parameters.forceOverwrite }}" = "true" ] || [ "${{ parameters.forceOverwrite }}" = "True" ]; then
+                  args+=("--force")
+                fi
+
+                if [ "${{ parameters.dryRun }}" = "true" ] || [ "${{ parameters.dryRun }}" = "True" ]; then
+                  args+=("--dry-run")
+                fi
+
+                echo "Running migration helper with arguments: ${args[*]}"
+                python3 -u scripts/acr_transfer.py "${args[@]}"

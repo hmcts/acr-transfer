@@ -87,6 +87,38 @@ To use in a CI/CD pipeline (e.g. Azure DevOps, GitHub Actions):
   displayName: 'Run ACR Transfer'
 ```
 
+## Cross-Subscription Support
+
+This utility now supports migrating artifacts between ACRs in different Azure subscriptions.
+
+### New Required Arguments
+
+- `--source-subscription-id`: Azure subscription ID for the source ACR.
+- `--target-subscription-id`: Azure subscription ID for the target ACR.
+
+These arguments ensure the script can authenticate and query the correct registry resource IDs for cross-subscription imports.
+
+### Example Usage
+
+```sh
+python3 scripts/acr_transfer.py \
+  --source-registry-name <SOURCE_ACR_NAME> \
+  --target-registry-name <TARGET_ACR_NAME> \
+  --source-subscription-id <SOURCE_SUBSCRIPTION_ID> \
+  --target-subscription-id <TARGET_SUBSCRIPTION_ID> \
+  [other options]
+```
+
+### Best Practices
+- Always use the correct subscription IDs for source and target.
+- The script will automatically fetch the resource ID for the source registry and use it for import.
+- You do not need to log in to the source registry; only the target registry needs to be authenticated for import.
+- If importing from multiple source registries with matching repository names, tags will be merged in the target registry. Use `--force` to overwrite tags if needed.
+- Review repository and tag naming to avoid accidental overwrites.
+
+### Security Note
+- The script does not log registry resource IDs to avoid exposing sensitive information.
+
 ## Notes
 
 - Patterns in `ignore-config.json` can be globs or regex (with `re:` prefix).
