@@ -57,22 +57,34 @@ def _run_az(command: Sequence[str], *, expect_json: bool = False) -> str | list 
 class TransferContext:
     source_name: str
     target_name: str
-    source_login: str
+    source_login: str  # This will be the resource ID
     dry_run: bool
     force: bool
     delay: float
+    target_subscription_id: str
 
 def _resolve_login_server(registry_name: str) -> str:
-    return _run_az([
-        "acr",
-        "show",
-        "--name",
-        registry_name,
-        "--query",
-        "loginServer",
-        "--output",
-        "tsv",
-    ])
+        login_server = _run_az([
+            "acr",
+            "show",
+            "--name",
+            registry_name,
+            "--query",
+            "loginServer",
+            "--output",
+            "tsv",
+        ])
+        resource_id = _run_az([
+            "acr",
+            "show",
+            "--name",
+            registry_name,
+            "--query",
+            "id",
+            "--output",
+            "tsv",
+        ])
+        return login_server, resource_id
 
 def _parse_letters_filter(filter_expression: Optional[str]) -> Callable[[str], bool]:
     if not filter_expression:
@@ -205,20 +217,26 @@ def _list_tags(registry: str, repository: str) -> List[str]:
     return list(tags)
 
 def _import_artifact(context: TransferContext, repository: str, tag: str) -> None:
-    source_ref = f"{context.source_login}/{repository}:{tag}"
-    args = [
-        "acr",
-        "import",
-        "--name",
-        context.target_name,
-        "--source",
-        source_ref,
-        "--image",
-        f"{repository}:{tag}",
-    ]
-    if context.force:
-        args.append("--force")
-    _run_az(args)
+        # Set context to target subscription before import
+        _run_az(["account", "set", "--subscription", context.target_subscription_id])
+        source_ref = f"{repository}:{tag}"
+        # context.source_login is now a tuple (login_server, resource_id)
+        resource_id = context.source_login[1] if isinstance(context.source_login, tuple) else context.source_login
+        args = [
+            "acr",
+            "import",
+            "--name",
+            context.target_name,
+            "--source",
+            source_ref,
+            "--image",
+            f"{repository}:{tag}",
+            "--registry",
+            resource_id,
+        ]
+        if context.force:
+            args.append("--force")
+        _run_az(args)
 
 def perform_transfer(
     context: TransferContext,

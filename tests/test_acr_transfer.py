@@ -121,6 +121,7 @@ def test_perform_transfer_dry_run_and_skip(monkeypatch):
         dry_run=True,
         force=False,
         delay=0.0,
+        target_subscription_id="dummy-sub-id",
     )
     # Only repo2 should be scheduled for migration
     acr_transfer.perform_transfer(context, ["repo1", "repo2", "repo3"], max_repositories=2)
@@ -151,6 +152,7 @@ def test_perform_transfer_force(monkeypatch):
         dry_run=True,
         force=True,
         delay=0.0,
+        target_subscription_id="dummy-sub-id",
     )
     acr_transfer.perform_transfer(context, ["repo1"], max_repositories=1)
 

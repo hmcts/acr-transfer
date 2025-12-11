@@ -27,6 +27,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Transfer artifacts between Azure Container Registries.")
     parser.add_argument("--source-registry-name", required=True, help="Name of the source Azure Container Registry.")
     parser.add_argument("--target-registry-name", required=True, help="Name of the target Azure Container Registry.")
+    parser.add_argument("--source-subscription-id", required=True, help="Azure subscription ID for the source ACR.")
+    parser.add_argument("--target-subscription-id", required=True, help="Azure subscription ID for the target ACR.")
     parser.add_argument("--repository", help="Single repository name to transfer. Overrides letter filters.")
     parser.add_argument(
         "--letters",
@@ -93,11 +95,19 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     ignore_predicate = _compile_ignore_filter(ignore_patterns)
 
     _log("Resolving registry endpoints...", "bold")
+    # Set context to source subscription before getting source registry info
     try:
-        source_login_server = _resolve_login_server(args.source_registry_name)
-        target_login_server = _resolve_login_server(args.target_registry_name)
+        _run_az(["account", "set", "--subscription", args.source_subscription_id])
+        source_login_server, source_resource_id = _resolve_login_server(args.source_registry_name)
     except AzCliError as error:
-        _log(f"Unable to resolve registry endpoints: {error}")
+        _log(f"Unable to resolve source registry endpoint: {error}")
+        sys.exit(1)
+    # Set context to target subscription before getting target registry info
+    try:
+        _run_az(["account", "set", "--subscription", args.target_subscription_id])
+        target_login_server, target_resource_id = _resolve_login_server(args.target_registry_name)
+    except AzCliError as error:
+        _log(f"Unable to resolve target registry endpoint: {error}")
         sys.exit(1)
 
     _log(f"Source registry login server: {source_login_server}", "cyan")
@@ -108,10 +118,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     context = TransferContext(
         source_name=args.source_registry_name,
         target_name=args.target_registry_name,
-        source_login=source_login_server,
+        source_login=(source_login_server, source_resource_id),
         dry_run=args.dry_run,
         force=args.force,
         delay=args.delay_seconds,
+        target_subscription_id=args.target_subscription_id,
     )
 
     if args.repository:

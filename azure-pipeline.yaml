@@ -56,19 +56,23 @@ variables:
   ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'cft')) }}:
     sourceacrName: hmctspublic.azurecr.io
     targetacrName: hmctsprod.azurecr.io
-    serviceConnection: DCD-CNP-PROD
+    targetServiceConnection: DCD-CNP-PROD
+    sourceServiceConnection: DCD-CNP-PROD
   ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'sds')) }}:
     sourceacrName: sdshmctspublic.azurecr.io
     targetacrName: hmctsprod.azurecr.io
-    serviceConnection: DCD-CNP-PROD
+    targetServiceConnection: DCD-CNP-PROD
+    sourceServiceConnection: DTS-SHAREDSERVICES-PROD
   ${{ if and(eq(parameters.environment, 'sbox'), eq(parameters.platform, 'cft')) }}:
     sourceacrName: hmctssandbox.azurecr.io
     targetacrName: hmctssbox.azurecr.io
-    serviceConnection: DCD-CFT-Sandbox
+    targetServiceConnection: DCD-CFT-Sandbox
+    sourceServiceConnection: DCD-CFT-Sandbox
   ${{ if and(eq(parameters.environment, 'sbox'), eq(parameters.platform, 'sds')) }}:
     sourceacrName: sdshmctspublicsbox.azurecr.io
     targetacrName: hmctssbox.azurecr.io
-    serviceConnection: DCD-CFT-Sandbox
+    targetServiceConnection: DCD-CFT-Sandbox
+    sourceServiceConnection: DTS-SHAREDSERVICES-SBOX
 
 stages:
   - stage: Migrate
@@ -84,17 +88,18 @@ stages:
           - task: AzureCLI@2
             displayName: Execute migration script
             inputs:
-              azureSubscription: $(serviceConnection)
+              azureSubscription: $(targetServiceConnection)
               scriptType: bash
               scriptLocation: inlineScript
               inlineScript: |
                 set -euo pipefail
                 cd "$(System.DefaultWorkingDirectory)"
 
-
                 args=(
                   "--source-registry-name" "$(sourceacrName)"
+                  "--source-subscription-id" "$(sourceServiceConnection)"
                   "--target-registry-name" "$(targetacrName)"
+                  "--target-subscription-id" "$(targetServiceConnection)"
                   "--max-repositories" "${{ parameters.maxRepositories }}"
                   "--delay-seconds" "${{ parameters.delaySeconds }}"
                 )
@@ -105,7 +110,6 @@ stages:
                 if [ "${{ parameters.ignoreConfig }}" != "__unset__" ]; then
                   args+=("--ignore-config" "${{ parameters.ignoreConfig }}")
                 fi
-
 
                 if [ "${{ parameters.singleRepository }}" != "__unset__" ]; then
                   args+=("--repository" "${{ parameters.singleRepository }}")
