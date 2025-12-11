@@ -43,7 +43,6 @@ parameters:
     displayName: Overwrite - Force overwrite of existing tags in target registry
     type: boolean
     default: false
-
   - name: ignorePattern
     displayName: Optional ignore pattern(s) (comma-separated or repeated)
     type: string
