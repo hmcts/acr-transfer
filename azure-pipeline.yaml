@@ -56,7 +56,6 @@ parameters:
     default: 120
 
 variables:
-  timeoutInMinutes: ${{ parameters.pipelineTimeout }}
   ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'cft')) }}:
     sourceacrName: hmctspublic.azurecr.io
     targetacrName: hmctsprod.azurecr.io
@@ -86,6 +85,7 @@ stages:
         displayName: "Run Migrate ACR Script - ${{ variables.sourceacrName }} to ${{ variables.targetacrName }}"
         pool:
           name: hmcts-cftptl-agent-pool
+        timeoutInMinutes: ${{ parameters.pipelineTimeout }}
         steps:
           - checkout: self
 
