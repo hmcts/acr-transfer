@@ -53,6 +53,7 @@ parameters:
     default: '__unset__'
 
 variables:
+  timeoutInMinutes: 120
   ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'cft')) }}:
     sourceacrName: hmctspublic.azurecr.io
     targetacrName: hmctsprod.azurecr.io
