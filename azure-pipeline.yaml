@@ -51,8 +51,12 @@ parameters:
     displayName: Optional ignore config file path
     type: string
     default: '__unset__'
+  - name: pipelineTimeout
+    type: number
+    default: 120
 
 variables:
+  timeoutInMinutes: ${{ parameters.pipelineTimeout }}
   ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'cft')) }}:
     sourceacrName: hmctspublic.azurecr.io
     targetacrName: hmctsprod.azurecr.io
