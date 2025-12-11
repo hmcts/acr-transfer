@@ -12,6 +12,13 @@ parameters:
     values:
       - prod
       - sbox
+  - name: platform
+    displayName: Platform
+    type: string
+    default: cft
+    values:
+      - cft
+      - sds
   - name: singleRepository
     displayName: Optional single repository to transfer
     type: string
@@ -47,12 +54,20 @@ parameters:
     default: '__unset__'
 
 variables:
-  ${{ if eq(parameters.environment, 'prod') }}:
+  ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'cft')) }}:
     sourceacrName: hmctspublic.azurecr.io
     targetacrName: hmctsprod.azurecr.io
     serviceConnection: DCD-CNP-PROD
-  ${{ if eq(parameters.environment, 'sbox') }}:
+  ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'sds')) }}:
+    sourceacrName: sdshmctspublic.azurecr.io
+    targetacrName: hmctsprod.azurecr.io
+    serviceConnection: DCD-CNP-PROD
+  ${{ if and(eq(parameters.environment, 'sbox'), eq(parameters.platform, 'cft')) }}:
     sourceacrName: hmctssandbox.azurecr.io
+    targetacrName: hmctssbox.azurecr.io
+    serviceConnection: DCD-CFT-Sandbox
+  ${{ if and(eq(parameters.environment, 'sbox'), eq(parameters.platform, 'sds')) }}:
+    sourceacrName: sdshmctspublicsbox.azurecr.io
     targetacrName: hmctssbox.azurecr.io
     serviceConnection: DCD-CFT-Sandbox
 
