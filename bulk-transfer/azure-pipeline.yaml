@@ -1,0 +1,128 @@
+# Bulk ACR Transfer Pipeline
+# Run with parameter: operation = export or import
+
+parameters:
+  - name: operation
+    displayName: Operation
+    type: string
+    default: export
+    values:
+      - export
+      - import
+  - name: mode
+    displayName: Mode
+    type: string
+    default: create
+    values:
+      - create
+      - migrate
+
+variables:
+  # Source
+  SOURCE_RESOURCE_GROUP: my-source-rg
+  SOURCE_ACR_NAME: mysourceacr
+  SOURCE_KEYVAULT_NAME: mysourcekv
+  SOURCE_STORAGE_ACCOUNT: mysourceblob
+  # Target
+  TARGET_RESOURCE_GROUP: my-target-rg
+  TARGET_ACR_NAME: mytargetacr
+  TARGET_KEYVAULT_NAME: mytargetkv
+  TARGET_STORAGE_ACCOUNT: mytargetblob
+  # Shared
+  BLOB_NAME: repo1
+  ARTIFACTS: "hello-world:latest"
+  CONTAINER_NAME: transfer
+  EXPORT_PIPELINE_NAME: export-pipeline
+  EXPORT_PIPELINE_RUN: export-pipeline-run
+  EXPORT_SECRET_NAME: acrexportsas
+  IMPORT_PIPELINE_NAME: import-pipeline
+  IMPORT_PIPELINE_RUN: import-pipeline-run
+  IMPORT_SECRET_NAME: acrimportsas
+
+trigger: none
+pr: none
+
+jobs:
+  - job: BulkTransfer
+    displayName: 'Bulk ACR Transfer - ${{ parameters.operation | upper }} ${{ parameters.mode | upper }}'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - checkout: self
+
+      - task: AzureCLI@2
+        displayName: 'Install acrtransfer CLI extension'
+        inputs:
+          azureSubscription: '<YOUR-SERVICE-CONNECTION>'
+          scriptType: bash
+          scriptLocation: inlineScript
+          inlineScript: |
+            az extension add --name acrtransfer
+
+      # ExportPipeline creation
+      - ${{ if and(eq(parameters.operation, 'export'), eq(parameters.mode, 'create')) }}:
+        - task: AzureCLI@2
+          displayName: 'Create ExportPipeline'
+          inputs:
+            azureSubscription: '<YOUR-SERVICE-CONNECTION>'
+            scriptType: bash
+            scriptLocation: inlineScript
+            inlineScript: |
+              az acr export-pipeline create \
+                --resource-group "$(SOURCE_RESOURCE_GROUP)" \
+                --registry "$(SOURCE_ACR_NAME)" \
+                --name "$(EXPORT_PIPELINE_NAME)" \
+                --secret-uri "https://$(SOURCE_KEYVAULT_NAME).vault.azure.net/secrets/$(EXPORT_SECRET_NAME)" \
+                --storage-container-uri "https://$(SOURCE_STORAGE_ACCOUNT).blob.core.windows.net/$(CONTAINER_NAME)"
+
+      # ExportPipeline batch migrate
+      - ${{ if and(eq(parameters.operation, 'export'), eq(parameters.mode, 'migrate')) }}:
+        - task: AzureCLI@2
+          displayName: 'Run Batch Export Script'
+          inputs:
+            azureSubscription: '<YOUR-SERVICE-CONNECTION>'
+            scriptType: bash
+            scriptLocation: inlineScript
+            workingDirectory: $(System.DefaultWorkingDirectory)
+            inlineScript: |
+              python3 bulk-transfer/batch_export.py \
+                --acr-name $(SOURCE_ACR_NAME) \
+                --pipeline-name $(EXPORT_PIPELINE_NAME) \
+                --storage-uri "https://$(SOURCE_STORAGE_ACCOUNT).blob.core.windows.net/$(CONTAINER_NAME)?$(EXPORT_SECRET_NAME)" \
+                --batch-size 50 \
+                --prefix export-batch
+
+      # ImportPipeline creation
+      - ${{ if and(eq(parameters.operation, 'import'), eq(parameters.mode, 'create')) }}:
+        - task: AzureCLI@2
+          displayName: 'Create ImportPipeline'
+          inputs:
+            azureSubscription: '<YOUR-SERVICE-CONNECTION>'
+            scriptType: bash
+            scriptLocation: inlineScript
+            inlineScript: |
+              az acr import-pipeline create \
+                --resource-group "$(TARGET_RESOURCE_GROUP)" \
+                --registry "$(TARGET_ACR_NAME)" \
+                --name "$(IMPORT_PIPELINE_NAME)" \
+                --secret-uri "https://$(TARGET_KEYVAULT_NAME).vault.azure.net/secrets/$(IMPORT_SECRET_NAME)" \
+                --storage-container-uri "https://$(TARGET_STORAGE_ACCOUNT).blob.core.windows.net/$(CONTAINER_NAME)"
+
+      # ImportPipeline batch migrate
+      - ${{ if and(eq(parameters.operation, 'import'), eq(parameters.mode, 'migrate')) }}:
+        - task: AzureCLI@2
+          displayName: 'Run Batch Import Script'
+          inputs:
+            azureSubscription: '<YOUR-SERVICE-CONNECTION>'
+            scriptType: bash
+            scriptLocation: inlineScript
+            workingDirectory: $(System.DefaultWorkingDirectory)
+            inlineScript: |
+              python3 bulk-transfer/batch_import.py \
+                --acr-name $(TARGET_ACR_NAME) \
+                --pipeline-name $(IMPORT_PIPELINE_NAME) \
+                --storage-account $(TARGET_STORAGE_ACCOUNT) \
+                --container $(CONTAINER_NAME) \
+                --storage-uri "https://$(TARGET_STORAGE_ACCOUNT).blob.core.windows.net/$(CONTAINER_NAME)?$(IMPORT_SECRET_NAME)" \
+                --batch-size 50 \
+                --prefix import-batch
