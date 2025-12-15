@@ -24,16 +24,18 @@ def list_blobs(storage_account: str, container: str, sas_token: str = None) -> L
 def split_batches(items: List[str], batch_size: int) -> List[List[str]]:
     return [items[i:i+batch_size] for i in range(0, len(items), batch_size)]
 
-def trigger_import_pipeline(acr_name: str, pipeline_name: str, blobs: List[str], storage_uri: str, run_name: str):
+def trigger_import_pipeline(resource_group: str, acr_name: str, pipeline_name: str, blobs: List[str], storage_uri: str, run_name: str):
     # The import pipeline expects a list of blob names (relative to the container)
     blobs_json = json.dumps(blobs)
     cmd = [
         "az", "acr", "pipeline-run", "create",
+        "--resource-group", resource_group,
         "--registry", acr_name,
-        "--name", pipeline_name,
+        "--pipeline", pipeline_name,
+        "--name", run_name,
+        "--pipeline-type", "import",
+        "--storage-blob", run_name,
         "--artifacts", blobs_json,
-        "--storage-uri", storage_uri,
-        "--run-name", run_name,
         "--output", "json"
     ]
     print(f"Triggering import pipeline run: {run_name} with {len(blobs)} blobs...")
@@ -44,8 +46,9 @@ def trigger_import_pipeline(acr_name: str, pipeline_name: str, blobs: List[str],
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Batch ACR import pipeline runner.")
+    parser.add_argument("--resource-group", required=True, help="Resource group of the ACR registry")
     parser.add_argument("--acr-name", required=True, help="Target ACR name")
-    parser.add_argument("--pipeline-name", required=True, help="Import pipeline name")
+    parser.add_argument("--pipeline-name", required=True, help="Import pipeline name (letters/numbers only, e.g. importpipeline)")
     parser.add_argument("--storage-account", required=True, help="Storage account name")
     parser.add_argument("--container", required=True, help="Blob container name")
     parser.add_argument("--storage-uri", required=True, help="Blob container SAS URI")
@@ -68,6 +71,7 @@ def main():
             print(batch)
         else:
             trigger_import_pipeline(
+                args.resource_group,
                 args.acr_name,
                 args.pipeline_name,
                 batch,

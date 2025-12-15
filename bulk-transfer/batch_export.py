@@ -35,15 +35,17 @@ def get_all_artifacts(acr_name: str) -> List[str]:
 def split_batches(items: List[str], batch_size: int) -> List[List[str]]:
     return [items[i:i+batch_size] for i in range(0, len(items), batch_size)]
 
-def trigger_export_pipeline(acr_name: str, pipeline_name: str, artifacts: List[str], storage_uri: str, run_name: str):
+def trigger_export_pipeline(resource_group: str, acr_name: str, pipeline_name: str, artifacts: List[str], storage_uri: str, run_name: str):
     artifacts_json = json.dumps(artifacts)
     cmd = [
         "az", "acr", "pipeline-run", "create",
+        "--resource-group", resource_group,
         "--registry", acr_name,
-        "--name", pipeline_name,
+        "--pipeline", pipeline_name,
+        "--name", run_name,
+        "--pipeline-type", "export",
+        "--storage-blob", run_name,
         "--artifacts", artifacts_json,
-        "--storage-uri", storage_uri,
-        "--run-name", run_name,
         "--output", "json"
     ]
     print(f"Triggering pipeline run: {run_name} with {len(artifacts)} artifacts...")
@@ -54,8 +56,9 @@ def trigger_export_pipeline(acr_name: str, pipeline_name: str, artifacts: List[s
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Batch ACR export pipeline runner.")
+    parser.add_argument("--resource-group", required=True, help="Resource group of the ACR registry")
     parser.add_argument("--acr-name", required=True, help="Source ACR name")
-    parser.add_argument("--pipeline-name", required=True, help="Export pipeline name")
+    parser.add_argument("--pipeline-name", required=True, help="Export pipeline name (letters/numbers only, e.g. exportpipeline)")
     parser.add_argument("--storage-uri", required=True, help="Destination blob storage URI")
     parser.add_argument("--batch-size", type=int, default=50, help="Artifacts per batch (default: 50)")
     parser.add_argument("--prefix", default="export-batch", help="Prefix for pipeline run names")
@@ -74,6 +77,7 @@ def main():
             print(batch)
         else:
             trigger_export_pipeline(
+                args.resource_group,
                 args.acr_name,
                 args.pipeline_name,
                 batch,

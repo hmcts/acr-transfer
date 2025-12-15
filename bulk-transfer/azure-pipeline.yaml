@@ -29,14 +29,10 @@ variables:
   TARGET_KEYVAULT_NAME: mytargetkv
   TARGET_STORAGE_ACCOUNT: mytargetblob
   # Shared
-  BLOB_NAME: repo1
-  ARTIFACTS: "hello-world:latest"
   CONTAINER_NAME: transfer
-  EXPORT_PIPELINE_NAME: export-pipeline
-  EXPORT_PIPELINE_RUN: export-pipeline-run
+  EXPORT_PIPELINE_NAME: exportPipeline
   EXPORT_SECRET_NAME: acrexportsas
-  IMPORT_PIPELINE_NAME: import-pipeline
-  IMPORT_PIPELINE_RUN: import-pipeline-run
+  IMPORT_PIPELINE_NAME: importPipeline
   IMPORT_SECRET_NAME: acrimportsas
 
 trigger: none
@@ -86,6 +82,7 @@ jobs:
             workingDirectory: $(System.DefaultWorkingDirectory)
             inlineScript: |
               python3 bulk-transfer/batch_export.py \
+                --resource-group $(SOURCE_RESOURCE_GROUP) \
                 --acr-name $(SOURCE_ACR_NAME) \
                 --pipeline-name $(EXPORT_PIPELINE_NAME) \
                 --storage-uri "https://$(SOURCE_STORAGE_ACCOUNT).blob.core.windows.net/$(CONTAINER_NAME)?$(EXPORT_SECRET_NAME)" \
@@ -119,6 +116,7 @@ jobs:
             workingDirectory: $(System.DefaultWorkingDirectory)
             inlineScript: |
               python3 bulk-transfer/batch_import.py \
+                --resource-group $(TARGET_RESOURCE_GROUP) \
                 --acr-name $(TARGET_ACR_NAME) \
                 --pipeline-name $(IMPORT_PIPELINE_NAME) \
                 --storage-account $(TARGET_STORAGE_ACCOUNT) \
