@@ -151,6 +151,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             tags_to_process = [tag for tag in tags if tag not in target_tag_set]
         scheduled_repos = [args.repository] if tags_to_process else []
     else:
+        import concurrent.futures
         try:
             all_repositories = _list_repositories(args.source_registry_name)
         except AzCliError as error:
@@ -169,7 +170,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         scheduled_repos = []
         skipped_no_tags = []
         skipped_all_tags_present = []
-        for repo in repositories:
+
+        def fetch_tags_for_repo(repo):
             try:
                 tags = _list_tags(args.source_registry_name, repo)
             except AzCliError:
@@ -182,6 +184,24 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     target_tags = []
                 else:
                     target_tags = []
+            return repo, tags, target_tags
+
+        _log(f"Fetching tags for {len(repositories)} repositories in parallel...", "bold")
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+            future_to_repo = {executor.submit(fetch_tags_for_repo, repo): repo for repo in repositories}
+            for idx, future in enumerate(concurrent.futures.as_completed(future_to_repo), 1):
+                repo = future_to_repo[future]
+                try:
+                    repo, tags, target_tags = future.result()
+                except Exception as exc:
+                    _log(f"[ERROR] Exception fetching tags for {repo}: {exc}", "red")
+                    tags, target_tags = [], []
+                results.append((repo, tags, target_tags))
+                if idx % 25 == 0 or idx == len(repositories):
+                    _log(f"Processed {idx}/{len(repositories)} repositories...")
+
+        for repo, tags, target_tags in results:
             target_tag_set = set(target_tags)
             if not tags:
                 skipped_no_tags.append(repo)
