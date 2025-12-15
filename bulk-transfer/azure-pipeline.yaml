@@ -16,111 +16,173 @@ parameters:
     values:
       - create
       - migrate
+  - name: environment
+    displayName: Environment
+    type: string
+    default: sbox
+    values:
+      - prod
+      - sbox
+  - name: platform
+    displayName: Platform
+    type: string
+    default: cft
+    values:
+      - cft
+      - sds
 
 variables:
-  # Source
-  SOURCE_RESOURCE_GROUP: my-source-rg
-  SOURCE_ACR_NAME: mysourceacr
-  SOURCE_KEYVAULT_NAME: mysourcekv
-  SOURCE_STORAGE_ACCOUNT: mysourceblob
-  # Target
-  TARGET_RESOURCE_GROUP: my-target-rg
-  TARGET_ACR_NAME: mytargetacr
-  TARGET_KEYVAULT_NAME: mytargetkv
-  TARGET_STORAGE_ACCOUNT: mytargetblob
-  # Shared
-  CONTAINER_NAME: transfer
-  EXPORT_PIPELINE_NAME: exportPipeline
-  EXPORT_SECRET_NAME: acrexportsas
-  IMPORT_PIPELINE_NAME: importPipeline
-  IMPORT_SECRET_NAME: acrimportsas
+  ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'cft')) }}:
+    sourceResourceGroupName:
+    sourceAcrName: hmctspublic.azurecr.io
+    targetResourceGroupName:
+    targetAcrName: hmctsprod.azurecr.io
+    sourceServiceConnection: DCD-CNP-PROD
+    targetServiceConnection: DCD-CNP-PROD
+  ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'sds')) }}:
+    sourceResourceGroupName:
+    sourceAcrName: sdshmctspublic.azurecr.io
+    targetResourceGroupName:
+    targetAcrName: hmctsprod.azurecr.io
+    sourceServiceConnection: DTS-SHAREDSERVICES-PROD
+    targetServiceConnection: DCD-CNP-PROD
+  ${{ if and(eq(parameters.environment, 'sbox'), eq(parameters.platform, 'cft')) }}:
+    sourceResourceGroupName:
+    sourceAcrName: hmctssandbox.azurecr.io
+    targetResourceGroupName:
+    targetAcrName: hmctssbox.azurecr.io
+    sourceServiceConnection: DCD-CFT-Sandbox
+    targetServiceConnection: DCD-CFT-Sandbox
+  ${{ if and(eq(parameters.environment, 'sbox'), eq(parameters.platform, 'sds')) }}:
+    sourceResourceGroupName:
+    sourceAcrName: sdshmctspublicsbox.azurecr.io
+    targetResourceGroupName:
+    targetAcrName: hmctssbox.azurecr.io
+    sourceServiceConnection: DTS-SHAREDSERVICES-SBOX
+    targetServiceConnection: DCD-CFT-Sandbox
+  ${{ if eq(parameters.environment, 'prod') }}:
+    keyVaultName:
+    storageAccountName:
+    storageContainerName: acrtransfer
+    exportPipelineName: acrExportPipeline
+    exportSecretName: acrexportsas
+    importPipelineName: acrImportPipeline
+    importSecretName: acrimportsas
+  ${{ if eq(parameters.environment, 'sbox') }}:
+    keyVaultName:
+    storageAccountName:
+    storageContainerName: acrtransfer
+    exportPipelineName: acrExportPipeline
+    exportSecretName: acrexportsas
+    importPipelineName: acrImportPipeline
+    importSecretName: acrimportsas
+
 
 trigger: none
 pr: none
 
 jobs:
+  - job: FetchManagedIdentity
+    displayName: 'Fetch acrManagedIdentity from Key Vault'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - task: AzureKeyVault@2
+        displayName: 'Get acrManagedIdentity from Key Vault'
+        inputs:
+          azureSubscription: $(targetServiceConnection)
+          keyVaultName: $(keyVaultName)
+          secretsFilter: 'acrManagedIdentity'
+
   - job: BulkTransfer
     displayName: 'Bulk ACR Transfer - ${{ parameters.operation | upper }} ${{ parameters.mode | upper }}'
     pool:
       vmImage: 'ubuntu-latest'
+    dependsOn: FetchManagedIdentity
+    variables:
+      ACR_MANAGED_IDENTITY: $(acrManagedIdentity)
     steps:
       - checkout: self
 
       - task: AzureCLI@2
         displayName: 'Install acrtransfer CLI extension'
         inputs:
-          azureSubscription: '<YOUR-SERVICE-CONNECTION>'
+          azureSubscription: "$(targetServiceConnection)"
           scriptType: bash
           scriptLocation: inlineScript
           inlineScript: |
             az extension add --name acrtransfer
-
       # ExportPipeline creation
       - ${{ if and(eq(parameters.operation, 'export'), eq(parameters.mode, 'create')) }}:
         - task: AzureCLI@2
           displayName: 'Create ExportPipeline'
+          env:
+            ACR_MANAGED_IDENTITY: $(ACR_MANAGED_IDENTITY)
           inputs:
-            azureSubscription: '<YOUR-SERVICE-CONNECTION>'
+            azureSubscription: "$(sourceServiceConnection)"
             scriptType: bash
             scriptLocation: inlineScript
             inlineScript: |
               az acr export-pipeline create \
-                --resource-group "$(SOURCE_RESOURCE_GROUP)" \
-                --registry "$(SOURCE_ACR_NAME)" \
-                --name "$(EXPORT_PIPELINE_NAME)" \
-                --secret-uri "https://$(SOURCE_KEYVAULT_NAME).vault.azure.net/secrets/$(EXPORT_SECRET_NAME)" \
-                --storage-container-uri "https://$(SOURCE_STORAGE_ACCOUNT).blob.core.windows.net/$(CONTAINER_NAME)"
+                --resource-group "$(sourceResourceGroupName)" \
+                --registry "$(sourceAcrName)" \
+                --name "$(exportPipelineName)" \
+                --secret-uri "https://$(sourceKeyVaultName).vault.azure.net/secrets/$(exportSecretName)" \
+                --storage-container-uri "https://$(storageAccountName).blob.core.windows.net/$(storageContainerName)" \
+                --assign-identity "$ACR_MANAGED_IDENTITY" \
+                --options ContinueOnErrors
 
       # ExportPipeline batch migrate
       - ${{ if and(eq(parameters.operation, 'export'), eq(parameters.mode, 'migrate')) }}:
         - task: AzureCLI@2
           displayName: 'Run Batch Export Script'
           inputs:
-            azureSubscription: '<YOUR-SERVICE-CONNECTION>'
+            azureSubscription: "$(sourceServiceConnection)"
             scriptType: bash
             scriptLocation: inlineScript
             workingDirectory: $(System.DefaultWorkingDirectory)
             inlineScript: |
               python3 bulk-transfer/batch_export.py \
-                --resource-group $(SOURCE_RESOURCE_GROUP) \
-                --acr-name $(SOURCE_ACR_NAME) \
-                --pipeline-name $(EXPORT_PIPELINE_NAME) \
-                --storage-uri "https://$(SOURCE_STORAGE_ACCOUNT).blob.core.windows.net/$(CONTAINER_NAME)?$(EXPORT_SECRET_NAME)" \
+                --resource-group $(sourceResourceGroupName) \
+                --acr-name $(sourceAcrName) \
+                --pipeline-name $(exportPipelineName) \
                 --batch-size 50 \
-                --prefix export-batch
+                --prefix exportbatch
 
       # ImportPipeline creation
       - ${{ if and(eq(parameters.operation, 'import'), eq(parameters.mode, 'create')) }}:
         - task: AzureCLI@2
           displayName: 'Create ImportPipeline'
+          env:
+            ACR_MANAGED_IDENTITY: $(ACR_MANAGED_IDENTITY)
           inputs:
-            azureSubscription: '<YOUR-SERVICE-CONNECTION>'
+            azureSubscription: "$(targetServiceConnection)"
             scriptType: bash
             scriptLocation: inlineScript
             inlineScript: |
               az acr import-pipeline create \
-                --resource-group "$(TARGET_RESOURCE_GROUP)" \
-                --registry "$(TARGET_ACR_NAME)" \
-                --name "$(IMPORT_PIPELINE_NAME)" \
-                --secret-uri "https://$(TARGET_KEYVAULT_NAME).vault.azure.net/secrets/$(IMPORT_SECRET_NAME)" \
-                --storage-container-uri "https://$(TARGET_STORAGE_ACCOUNT).blob.core.windows.net/$(CONTAINER_NAME)"
+                --resource-group "$(targetResourceGroupName)" \
+                --registry "$(targetAcrName)" \
+                --name "$(importPipelineName)" \
+                --secret-uri "https://$(keyVaultName).vault.azure.net/secrets/$(importSecretName)" \
+                --storage-container-uri "https://$(storageAccountName).blob.core.windows.net/$(storageContainerName)" \
+                --assign-identity "$ACR_MANAGED_IDENTITY" \
+                --options ContinueOnErrors
 
       # ImportPipeline batch migrate
       - ${{ if and(eq(parameters.operation, 'import'), eq(parameters.mode, 'migrate')) }}:
         - task: AzureCLI@2
           displayName: 'Run Batch Import Script'
           inputs:
-            azureSubscription: '<YOUR-SERVICE-CONNECTION>'
+            azureSubscription: "$(targetServiceConnection)"
             scriptType: bash
             scriptLocation: inlineScript
             workingDirectory: $(System.DefaultWorkingDirectory)
             inlineScript: |
               python3 bulk-transfer/batch_import.py \
-                --resource-group $(TARGET_RESOURCE_GROUP) \
-                --acr-name $(TARGET_ACR_NAME) \
-                --pipeline-name $(IMPORT_PIPELINE_NAME) \
-                --storage-account $(TARGET_STORAGE_ACCOUNT) \
-                --container $(CONTAINER_NAME) \
-                --storage-uri "https://$(TARGET_STORAGE_ACCOUNT).blob.core.windows.net/$(CONTAINER_NAME)?$(IMPORT_SECRET_NAME)" \
-                --batch-size 50 \
-                --prefix import-batch
+                --resource-group $(targetResourceGroupName) \
+                --acr-name $(targetAcrName) \
+                --pipeline-name $(importPipelineName) \
+                --storage-account $(storageAccountName) \
+                --container $(storageContainerName) \
+                --prefix importbatch

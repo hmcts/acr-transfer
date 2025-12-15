@@ -35,7 +35,7 @@ def get_all_artifacts(acr_name: str) -> List[str]:
 def split_batches(items: List[str], batch_size: int) -> List[List[str]]:
     return [items[i:i+batch_size] for i in range(0, len(items), batch_size)]
 
-def trigger_export_pipeline(resource_group: str, acr_name: str, pipeline_name: str, artifacts: List[str], storage_uri: str, run_name: str):
+def trigger_export_pipeline(resource_group: str, acr_name: str, pipeline_name: str, artifacts: List[str], run_name: str):
     artifacts_json = json.dumps(artifacts)
     cmd = [
         "az", "acr", "pipeline-run", "create",
@@ -59,10 +59,12 @@ def main():
     parser.add_argument("--resource-group", required=True, help="Resource group of the ACR registry")
     parser.add_argument("--acr-name", required=True, help="Source ACR name")
     parser.add_argument("--pipeline-name", required=True, help="Export pipeline name (letters/numbers only, e.g. exportpipeline)")
-    parser.add_argument("--storage-uri", required=True, help="Destination blob storage URI")
+    # --storage-uri argument removed (unused)
     parser.add_argument("--batch-size", type=int, default=50, help="Artifacts per batch (default: 50)")
     parser.add_argument("--prefix", default="export-batch", help="Prefix for pipeline run names")
     parser.add_argument("--dry-run", action="store_true", help="Only print batches, do not trigger pipelines")
+
+    # --assign-identity and --options arguments removed (not valid for pipeline-run)
     args = parser.parse_args()
 
     all_artifacts = get_all_artifacts(args.acr_name)
@@ -81,7 +83,6 @@ def main():
                 args.acr_name,
                 args.pipeline_name,
                 batch,
-                args.storage_uri,
                 run_name
             )
         # Optional: sleep to avoid hitting concurrency limits

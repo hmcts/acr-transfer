@@ -21,10 +21,8 @@ def list_blobs(storage_account: str, container: str, sas_token: str = None) -> L
     blobs = json.loads(output)
     return [blob["name"] for blob in blobs]
 
-def split_batches(items: List[str], batch_size: int) -> List[List[str]]:
-    return [items[i:i+batch_size] for i in range(0, len(items), batch_size)]
 
-def trigger_import_pipeline(resource_group: str, acr_name: str, pipeline_name: str, blobs: List[str], storage_uri: str, run_name: str):
+def trigger_import_pipeline(resource_group: str, acr_name: str, pipeline_name: str, blobs: List[str], run_name: str):
     # The import pipeline expects a single blob name (relative to the container)
     blob_name = blobs[0]
     cmd = [
@@ -50,16 +48,17 @@ def main():
     parser.add_argument("--pipeline-name", required=True, help="Import pipeline name (letters/numbers only, e.g. importpipeline)")
     parser.add_argument("--storage-account", required=True, help="Storage account name")
     parser.add_argument("--container", required=True, help="Blob container name")
-    parser.add_argument("--storage-uri", required=True, help="Blob container SAS URI")
+    # --storage-uri argument removed (unused)
     parser.add_argument("--sas-token", help="SAS token for storage account (optional)")
     parser.add_argument("--subscription", help="Azure subscription ID or name")
-    parser.add_argument("--batch-size", type=int, default=50, help="Blobs per batch (default: 50)")
+    # batch-size argument removed; import is always one blob per run
     parser.add_argument("--prefix", default="import-batch", help="Prefix for pipeline run names")
     parser.add_argument("--dry-run", action="store_true", help="Only print batches, do not trigger pipelines")
+
+    # --assign-identity and --options arguments removed (not valid for pipeline-run)
     args = parser.parse_args()
 
     blobs = list_blobs(args.storage_account, args.container, args.sas_token)
-    print(f"Found {len(blobs)} blobs in container {args.container}.")
     print(f"Found {len(blobs)} blobs in container {args.container}.")
 
     for i, blob in enumerate(blobs, 1):
@@ -73,7 +72,6 @@ def main():
                 args.acr_name,
                 args.pipeline_name,
                 [blob],
-                args.storage_uri,
                 run_name
             )
         time.sleep(1)

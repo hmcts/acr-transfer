@@ -109,6 +109,62 @@ python3 scripts/acr_transfer.py \
   [other options]
 ```
 
+## Required Permissions for Cross-Subscription Migration
+
+To successfully migrate container images between Azure Container Registries (ACR) in different subscriptions, the following Azure roles and permissions are required:
+
+### 1. Source ACR (Export)
+- **AcrPull**: Allows reading (pulling) images from the source registry.
+- **Storage Blob Data Contributor**: Required if exporting to a storage account in a different subscription.
+
+### 2. Target ACR (Import)
+- **AcrPush**: Allows writing (pushing/importing) images to the target registry.
+
+### 3. Storage Account (Intermediate Blob Storage)
+- **Storage Blob Data Contributor**: Required for both export and import operations to read/write blobs.
+
+### 4. Key Vault (if using SAS tokens/secrets)
+- **Key Vault Secrets User**: Allows reading secrets (e.g., SAS tokens) from Azure Key Vault.
+
+### 5. Managed Identity (Recommended for Automation)
+If running in Azure DevOps, GitHub Actions, or other automation, use a managed identity or service principal. Assign the above roles to the identity at the appropriate scope (resource or resource group).
+
+#### Example: Assigning Roles via Azure CLI
+```sh
+# Assign AcrPull to source registry
+az role assignment create --assignee <IDENTITY_OBJECT_ID> --role AcrPull --scope $(az acr show --name <SOURCE_ACR> --query id -o tsv)
+
+# Assign AcrPush to target registry
+az role assignment create --assignee <IDENTITY_OBJECT_ID> --role AcrPush --scope $(az acr show --name <TARGET_ACR> --query id -o tsv)
+
+# Assign Storage Blob Data Contributor to storage account
+az role assignment create --assignee <IDENTITY_OBJECT_ID> --role "Storage Blob Data Contributor" --scope $(az storage account show --name <STORAGE_ACCOUNT> --query id -o tsv)
+
+# Assign Key Vault Secrets User to Key Vault (if needed)
+az role assignment create --assignee <IDENTITY_OBJECT_ID> --role "Key Vault Secrets User" --scope $(az keyvault show --name <KEYVAULT_NAME> --query id -o tsv)
+```
+
+> **Note:**
+> - Replace `<IDENTITY_OBJECT_ID>` with the object ID of your managed identity or service principal.
+> - Role assignments may take a few minutes to propagate.
+> - For cross-subscription scenarios, ensure the identity exists in both subscriptions or use a multi-tenant service principal.
+
+### Best Practices
+- Use managed identities for automation to avoid storing credentials.
+- Grant the minimum required permissions at the narrowest scope possible.
+- Regularly review and audit role assignments.
+- Use Azure Key Vault to securely store and access secrets (e.g., SAS tokens).
+
+### Troubleshooting Permission Errors
+- **Export/Import Fails with Authorization Error:**
+  - Check that the identity has the correct role on both source and target ACRs.
+  - Ensure Storage Blob Data Contributor is assigned for the storage account.
+- **Key Vault Access Denied:**
+  - Verify the identity has Key Vault Secrets User on the Key Vault.
+- **Cross-Subscription Issues:**
+  - Confirm the identity is assigned in both subscriptions and has the necessary roles.
+  - For Azure DevOps, ensure the service connection is configured for the correct subscription and has access to all required resources.
+
 ### Best Practices
 - Always use the correct subscription IDs for source and target.
 - The script will automatically fetch the resource ID for the source registry and use it for import.
