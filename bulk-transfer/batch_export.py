@@ -24,13 +24,30 @@ def list_tags(acr_name: str, repository: str) -> List[str]:
     return json.loads(output)
 
 def get_all_artifacts(acr_name: str) -> List[str]:
+    import concurrent.futures
     artifacts = []
     repos = list_repositories(acr_name)
-    for repo in repos:
+    print(f"Discovered {len(repos)} repositories in {acr_name}.")
+
+    def fetch_tags(repo):
         tags = list_tags(acr_name, repo)
-        for tag in tags:
-            artifacts.append(f"{repo}:{tag}")
-    return artifacts
+        print(f"  {repo}: {len(tags)} tags")
+        return [(repo, tag) for tag in tags]
+
+    all_artifacts = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+        future_to_repo = {executor.submit(fetch_tags, repo): repo for repo in repos}
+        for idx, future in enumerate(concurrent.futures.as_completed(future_to_repo), 1):
+            repo = future_to_repo[future]
+            try:
+                repo_artifacts = future.result()
+                all_artifacts.extend(repo_artifacts)
+            except Exception as exc:
+                print(f"  {repo}: generated an exception: {exc}", file=sys.stderr)
+            if idx % 25 == 0 or idx == len(repos):
+                print(f"Processed {idx}/{len(repos)} repositories...")
+    # Flatten to the expected format
+    return [f"{repo}:{tag}" for repo, tag in all_artifacts]
 
 def split_batches(items: List[str], batch_size: int) -> List[List[str]]:
     return [items[i:i+batch_size] for i in range(0, len(items), batch_size)]

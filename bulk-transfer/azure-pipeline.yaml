@@ -30,6 +30,10 @@ parameters:
     values:
       - cft
       - sds
+  - name: dryRun
+    displayName: Dry-run - Report actions without importing artifacts
+    type: boolean
+    default: true
 
 variables:
   ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'cft')) }}:
@@ -147,7 +151,8 @@ jobs:
                 --acr-name $(sourceAcrName) \
                 --pipeline-name $(exportPipelineName) \
                 --batch-size 50 \
-                --prefix exportbatch
+                --prefix exportbatch \
+                ${{ if eq(parameters.dryRun, true) }}--dry-run${{ end }}
 
       # ImportPipeline creation
       - ${{ if and(eq(parameters.operation, 'import'), eq(parameters.mode, 'create')) }}:
@@ -185,4 +190,5 @@ jobs:
                 --pipeline-name $(importPipelineName) \
                 --storage-account $(storageAccountName) \
                 --container $(storageContainerName) \
-                --prefix importbatch
+                --prefix importbatch \
+                ${{ if eq(parameters.dryRun, true) }}--dry-run${{ end }}
