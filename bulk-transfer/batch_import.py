@@ -13,10 +13,12 @@ def run_cli(cmd: List[str]):
         sys.exit(1)
     return result.stdout
 
-def list_blobs(storage_account: str, container: str, sas_token: str = None) -> List[str]:
+def list_blobs(storage_account: str, container: str, sas_token: str = None, subscription: str = None) -> List[str]:
     cmd = ["az", "storage", "blob", "list", "--account-name", storage_account, "--container-name", container, "--output", "json"]
     if sas_token:
         cmd += ["--sas-token", sas_token]
+    elif subscription:
+        cmd += ["--subscription", subscription]
     output = run_cli(cmd)
     blobs = json.loads(output)
     return [blob["name"] for blob in blobs]
@@ -40,32 +42,35 @@ def trigger_import_pipeline(resource_group: str, acr_name: str, pipeline_name: s
     print(f"Import pipeline run {run_name} started.")
     return json.loads(output)
 
+# Attach subscription as a static attribute for use in trigger_import_pipeline
+trigger_import_pipeline.subscription = None
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Batch ACR import pipeline runner.")
     parser.add_argument("--resource-group", required=True, help="Resource group of the ACR registry")
     parser.add_argument("--acr-name", required=True, help="Target ACR name")
     parser.add_argument("--pipeline-name", required=True, help="Import pipeline name (letters/numbers only, e.g. importpipeline)")
-    parser.add_argument("--storage-account", required=True, help="Storage account name")
+    parser.add_argument("--storage-account", required=True, help="Storage account name for blob container")
     parser.add_argument("--container", required=True, help="Blob container name")
-    # --storage-uri argument removed (unused)
     parser.add_argument("--sas-token", help="SAS token for storage account (optional)")
-    parser.add_argument("--subscription", help="Azure subscription ID or name")
-    # batch-size argument removed; import is always one blob per run
+    parser.add_argument("--subscription", help="Azure subscription ID or name (used only if no SAS token is provided)")
     parser.add_argument("--prefix", default="import-batch", help="Prefix for pipeline run names")
     parser.add_argument("--dry-run", action="store_true", help="Only print batches, do not trigger pipelines")
 
-    # --assign-identity and --options arguments removed (not valid for pipeline-run)
     args = parser.parse_args()
 
-    blobs = list_blobs(args.storage_account, args.container, args.sas_token)
+    blobs = list_blobs(args.storage_account, args.container, args.sas_token, args.subscription)
+    if not blobs:
+        print(f"No blobs found in container {args.container}.")
+        sys.exit(0)
     print(f"Found {len(blobs)} blobs in container {args.container}.")
 
     for i, blob in enumerate(blobs, 1):
-        run_name = f"{args.prefix}-{i:03d}"
+        run_name = f"{args.prefix}{i:03d}"
         print(f"Blob {i}: {blob}. Run name: {run_name}")
         if args.dry_run:
-            print(blob)
+            print(f"[DRY RUN] Would import blob: {blob}")
         else:
             trigger_import_pipeline(
                 args.resource_group,
