@@ -214,36 +214,59 @@ def _list_tags(registry: str, repository: str) -> List[str]:
         "--output",
         "json",
     ], expect_json=True)
-    return list(tags)
+    return sorted(list(tags))
 
-def _import_artifact(context: TransferContext, repository: str, tag: str) -> None:
-        # Set context to target subscription before import
-        _run_az(["account", "set", "--subscription", context.target_subscription_id])
-        source_ref = f"{repository}:{tag}"
-        # context.source_login is now a tuple (login_server, resource_id)
-        resource_id = context.source_login[1] if isinstance(context.source_login, tuple) else context.source_login
-        args = [
+def _tag_has_manifest(registry: str, repository: str, tag: str) -> bool:
+    """Return True if the tag has a valid manifest, False otherwise."""
+    try:
+        # Try to fetch the manifest digest for the tag
+        manifests = _run_az([
             "acr",
-            "import",
+            "repository",
+            "show-manifests",
             "--name",
-            context.target_name,
-            "--source",
-            source_ref,
-            "--image",
-            f"{repository}:{tag}",
-            "--registry",
-            resource_id,
-        ]
-        if context.force:
-            args.append("--force")
-        _run_az(args)
+            registry,
+            "--repository",
+            repository,
+            "--query",
+            f"[?tags[?@=='{tag}']].digest",
+            "--output",
+            "tsv",
+        ])
+        if isinstance(manifests, list):
+            return bool(manifests)
+        return bool(str(manifests).strip())
+    except AzCliError:
+        return False
+def _import_artifact(context: TransferContext, repository: str, tag: str) -> None:
+    # Set context to target subscription before import
+    _run_az(["account", "set", "--subscription", context.target_subscription_id])
+    source_ref = f"{repository}:{tag}"
+    resource_id = context.source_login[1] if isinstance(context.source_login, tuple) else context.source_login
+    args = [
+        "acr",
+        "import",
+        "--name",
+        context.target_name,
+        "--source",
+        source_ref,
+        "--image",
+        f"{repository}:{tag}",
+        "--registry",
+        resource_id,
+    ]
+    if context.force:
+        args.append("--force")
+    _run_az(args)
 
 def perform_transfer(
     context: TransferContext,
     repositories: Sequence[str],
     *,
     max_repositories: int,
+    parallel_imports: int = 3,
 ) -> None:
+    import concurrent.futures
     repo_count = 0
     processed_repos = 0
     acted_repos = 0
@@ -251,6 +274,7 @@ def perform_transfer(
     planned_imports = 0
     total_success = 0
     total_failures: List[str] = []
+    # dry_run_report removed
     for repository in repositories:
         if max_repositories and acted_repos >= max_repositories:
             _log("Reached repository processing limit. Stopping early as requested.")
@@ -284,41 +308,77 @@ def perform_transfer(
             tags_to_process = list(tags)
         else:
             tags_to_process = [tag for tag in tags if tag not in target_tag_set]
-        if not tags_to_process:
+        # Sort tags for deterministic order
+        tags_to_process = sorted(tags_to_process)
+        # Check for broken tags (missing manifests)
+        valid_tags = []
+        broken_tags = []
+        for tag in tags_to_process:
+            if _tag_has_manifest(context.source_name, repository, tag):
+                valid_tags.append(tag)
+            else:
+                broken_tags.append(tag)
+        if broken_tags:
+            _log(f"Skipping {len(broken_tags)} broken tag(s) for '{repository}': {', '.join(broken_tags[:3])}{'...' if len(broken_tags) > 3 else ''}", "yellow")
+        if not valid_tags:
             skipped_repos += 1
-            _log(f"All tags already present in target for '{repository}'. Skipping repository.")
+            _log(f"No valid tags to import for '{repository}'. Skipping repository.")
             continue
         acted_repos += 1
         if not context.force:
-            skipped_tags = [tag for tag in tags if tag not in tags_to_process]
+            skipped_tags = [tag for tag in tags if tag not in valid_tags]
             if skipped_tags:
                 display = ", ".join(skipped_tags[:3])
                 suffix = "" if len(skipped_tags) <= 3 else ", ..."
                 _log(
-                    f"Skipping {len(skipped_tags)} existing tag(s) for '{repository}': {display}{suffix}"
+                    f"Skipping {len(skipped_tags)} existing or invalid tag(s) for '{repository}': {display}{suffix}"
                 )
-        for index, tag in enumerate(tags_to_process, start=1):
-            operation_label = f"{repository}:{tag} ({index}/{len(tags_to_process)})"
-            planned_imports += 1
+        # Prepare import jobs
+        def import_job(tag):
+            operation_label = f"{repository}:{tag}"
             if context.dry_run:
                 _log(f"DRY-RUN would import {operation_label}")
-                continue
+                return (repository, tag, "dry-run", None)
             _log(f"Importing {operation_label}")
             try:
                 _import_artifact(context, repository, tag)
-                total_success += 1
                 _log(f"Successfully imported {operation_label}")
+                return (repository, tag, "success", None)
             except AzCliError as error:
                 _log(f"Failed to import {operation_label}: {error}")
-                total_failures.append(f"{repository}:{tag}")
-            if not context.dry_run and context.delay:
-                time.sleep(context.delay)
+                return (repository, tag, "failure", str(error))
+        # Parallel or sequential import
+        if context.dry_run or parallel_imports <= 1:
+            for index, tag in enumerate(valid_tags, start=1):
+                planned_imports += 1
+                result = import_job(tag)
+                if not context.dry_run:
+                    if result[2] == "success":
+                        total_success += 1
+                    elif result[2] == "failure":
+                        total_failures.append(f"{repository}:{tag}")
+                if not context.dry_run and context.delay:
+                    time.sleep(context.delay)
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_imports) as executor:
+                future_to_tag = {executor.submit(import_job, tag): tag for tag in valid_tags}
+                for index, future in enumerate(concurrent.futures.as_completed(future_to_tag), 1):
+                    tag = future_to_tag[future]
+                    planned_imports += 1
+                    result = future.result()
+                    if not context.dry_run:
+                        if result[2] == "success":
+                            total_success += 1
+                        elif result[2] == "failure":
+                            total_failures.append(f"{repository}:{tag}")
+                    if not context.dry_run and context.delay:
+                        time.sleep(context.delay)
     _log("")
     _log(f"Transfer complete.", "green")
     _log(f"Repositories scanned: {processed_repos}", "green")
     _log(f"Repositories requiring action: {acted_repos}", "green")
     if skipped_repos:
-        _log(f"Repositories already synchronized: {skipped_repos}", "yellow")
+        _log(f"Repositories already synchronized or skipped: {skipped_repos}", "yellow")
     if context.dry_run:
         _log(f"Planned imports: {planned_imports}", "magenta")
     else:

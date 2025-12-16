@@ -19,6 +19,13 @@ parameters:
     values:
       - cft
       - sds
+  - name: state
+    displayName: State
+    type: string
+    default: public
+    values:
+      - public
+      - private
   - name: singleRepository
     displayName: Optional single repository to transfer
     type: string
@@ -76,6 +83,11 @@ variables:
     targetacrName: hmctssbox.azurecr.io
     targetServiceConnection: DCD-CFT-Sandbox
     sourceServiceConnection: DTS-SHAREDSERVICES-SBOX
+  ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'cft'), eq(parameters.state, 'private')) }}:
+    sourceacrName: hmctsprivate.azurecr.io
+    targetacrName: hmctsprod.azurecr.io
+    targetServiceConnection: DCD-CNP-PROD
+    sourceServiceConnection: DCD-CNP-PROD
 
 stages:
   - stage: Migrate

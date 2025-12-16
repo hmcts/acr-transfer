@@ -68,6 +68,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Overwrite existing tags in the target registry when duplicates are encountered.",
     )
+    parser.add_argument(
+        "--parallel-imports",
+        type=int,
+        default=1,
+        help="Number of parallel imports to run (default: 1, i.e., sequential). Use with caution.",
+    )
     return parser.parse_args(argv)
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
@@ -256,7 +262,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     _log("===============================", "cyan")
     _log("=== Beginning transfer loop ===", "bold")
     _log("===============================", "cyan")
-    perform_transfer(context, scheduled_repos, max_repositories=args.max_repositories)
+    perform_transfer(
+        context,
+        scheduled_repos,
+        max_repositories=args.max_repositories,
+        parallel_imports=args.parallel_imports,
+    )
 
 if __name__ == "__main__":
     main()
