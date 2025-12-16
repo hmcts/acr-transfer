@@ -63,22 +63,22 @@ parameters:
     default: 120
 
 variables:
-  ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'cft')) }}:
+  ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'cft'), eq(parameters.state, 'public')) }}:
     sourceacrName: hmctspublic.azurecr.io
     targetacrName: hmctsprod.azurecr.io
     targetServiceConnection: DCD-CNP-PROD
     sourceServiceConnection: DCD-CNP-PROD
-  ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'sds')) }}:
+  ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'sds'), eq(parameters.state, 'public')) }}:
     sourceacrName: sdshmctspublic.azurecr.io
     targetacrName: hmctsprod.azurecr.io
     targetServiceConnection: DCD-CNP-PROD
     sourceServiceConnection: DTS-SHAREDSERVICES-PROD
-  ${{ if and(eq(parameters.environment, 'sbox'), eq(parameters.platform, 'cft')) }}:
+  ${{ if and(eq(parameters.environment, 'sbox'), eq(parameters.platform, 'cft'), eq(parameters.state, 'public')) }}:
     sourceacrName: hmctssandbox.azurecr.io
     targetacrName: hmctssbox.azurecr.io
     targetServiceConnection: DCD-CFT-Sandbox
     sourceServiceConnection: DCD-CFT-Sandbox
-  ${{ if and(eq(parameters.environment, 'sbox'), eq(parameters.platform, 'sds')) }}:
+  ${{ if and(eq(parameters.environment, 'sbox'), eq(parameters.platform, 'sds'), eq(parameters.state, 'public')) }}:
     sourceacrName: sdshmctspublicsbox.azurecr.io
     targetacrName: hmctssbox.azurecr.io
     targetServiceConnection: DCD-CFT-Sandbox
