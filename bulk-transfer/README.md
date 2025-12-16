@@ -44,9 +44,9 @@ You can also run the scripts locally for testing:
 python3 batch_export.py \
   --acr-name <SOURCE_ACR> \
   --pipeline-name <EXPORT_PIPELINE_NAME> \
-  --storage-uri <BLOB_CONTAINER_SAS_URI> \
   --batch-size 50 \
-  --prefix export-batch
+  --prefix export-batch \
+  [--ignore-tags ignore-tags.json]
 ```
 
 #### Import
@@ -74,6 +74,31 @@ Add `--dry-run` to preview batches without triggering pipelines.
   ```sh
   az acr pipeline-run list --registry <ACR_NAME> --output table
   ```
+
+### Live Progress Table (Recommended)
+To watch export/import progress in your terminal, use:
+
+```sh
+watch -n 2 'az acr pipeline-run list --resource-group <RESOURCE_GROUP> --registry <ACR_NAME> --output json 2>/dev/null | jq -r '\''["NAME","PROGRESS","STATUS"], (.[] | [.name, .response.progress.percentage, .response.status]) | @tsv'\'' | column -t'
+```
+
+This will show a live-updating table of pipeline run progress, with warnings suppressed.
+## Ignoring Specific Tags
+
+You can skip specific tags from all batches by providing an `ignore-tags.json` file:
+
+```json
+[
+  {"repository": "repo1", "tag": "badtag1"},
+  {"repository": "repo2", "tag": "badtag2"}
+]
+```
+
+Then run:
+
+```sh
+python3 batch_export.py --acr-name <SOURCE_ACR> --pipeline-name <EXPORT_PIPELINE_NAME> --ignore-tags ignore-tags.json
+```
 
 ## Notes
 - Each artifact or blob is processed as a separate pipeline run batch (max 50 per run).
