@@ -264,7 +264,7 @@ def perform_transfer(
     repositories: Sequence[str],
     *,
     max_repositories: int,
-    parallel_imports: int = 3,
+    parallel_imports: int = 1,
 ) -> None:
     import concurrent.futures
     repo_count = 0
@@ -310,28 +310,18 @@ def perform_transfer(
             tags_to_process = [tag for tag in tags if tag not in target_tag_set]
         # Sort tags for deterministic order
         tags_to_process = sorted(tags_to_process)
-        # Check for broken tags (missing manifests)
-        valid_tags = []
-        broken_tags = []
-        for tag in tags_to_process:
-            if _tag_has_manifest(context.source_name, repository, tag):
-                valid_tags.append(tag)
-            else:
-                broken_tags.append(tag)
-        if broken_tags:
-            _log(f"Skipping {len(broken_tags)} broken tag(s) for '{repository}': {', '.join(broken_tags[:3])}{'...' if len(broken_tags) > 3 else ''}", "yellow")
-        if not valid_tags:
+        if not tags_to_process:
             skipped_repos += 1
-            _log(f"No valid tags to import for '{repository}'. Skipping repository.")
+            _log(f"No tags to import for '{repository}'. Skipping repository.")
             continue
         acted_repos += 1
         if not context.force:
-            skipped_tags = [tag for tag in tags if tag not in valid_tags]
+            skipped_tags = [tag for tag in tags if tag not in tags_to_process]
             if skipped_tags:
                 display = ", ".join(skipped_tags[:3])
                 suffix = "" if len(skipped_tags) <= 3 else ", ..."
                 _log(
-                    f"Skipping {len(skipped_tags)} existing or invalid tag(s) for '{repository}': {display}{suffix}"
+                    f"Skipping {len(skipped_tags)} existing tag(s) for '{repository}': {display}{suffix}"
                 )
         # Prepare import jobs
         def import_job(tag):
@@ -349,7 +339,7 @@ def perform_transfer(
                 return (repository, tag, "failure", str(error))
         # Parallel or sequential import
         if context.dry_run or parallel_imports <= 1:
-            for index, tag in enumerate(valid_tags, start=1):
+            for index, tag in enumerate(tags_to_process, start=1):
                 planned_imports += 1
                 result = import_job(tag)
                 if not context.dry_run:
@@ -361,7 +351,7 @@ def perform_transfer(
                     time.sleep(context.delay)
         else:
             with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_imports) as executor:
-                future_to_tag = {executor.submit(import_job, tag): tag for tag in valid_tags}
+                future_to_tag = {executor.submit(import_job, tag): tag for tag in tags_to_process}
                 for index, future in enumerate(concurrent.futures.as_completed(future_to_tag), 1):
                     tag = future_to_tag[future]
                     planned_imports += 1

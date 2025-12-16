@@ -71,7 +71,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--parallel-imports",
         type=int,
-        default=1,
+        default=2,
         help="Number of parallel imports to run (default: 1, i.e., sequential). Use with caution.",
     )
     return parser.parse_args(argv)
