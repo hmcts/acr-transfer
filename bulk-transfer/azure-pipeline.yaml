@@ -1,0 +1,210 @@
+# Bulk ACR Transfer Pipeline
+# Run with parameter: operation = export or import
+
+parameters:
+  - name: operation
+    displayName: Operation
+    type: string
+    default: export
+    values:
+      - export
+      - import
+  - name: mode
+    displayName: Mode
+    type: string
+    default: create
+    values:
+      - create
+      - migrate
+  - name: environment
+    displayName: Environment
+    type: string
+    default: sbox
+    values:
+      - prod
+      - sbox
+  - name: platform
+    displayName: Platform
+    type: string
+    default: cft
+    values:
+      - cft
+      - sds
+  - name: dryRun
+    displayName: Dry-run - Report actions without importing artifacts
+    type: boolean
+    default: true
+
+variables:
+  ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'cft')) }}:
+    sourceResourceGroupName: rpe-acr-prod-rg
+    sourceAcrName: hmctspublic.azurecr.io
+    targetResourceGroupName: rpe-acr-prod-rg
+    targetAcrName: hmctsprod.azurecr.io
+    sourceServiceConnection: DCD-CNP-PROD
+    targetServiceConnection: DCD-CNP-PROD
+    storageContainerName: hmctspublic
+    prefix: prodcft
+  ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'sds')) }}:
+    sourceResourceGroupName: sds-acr-rg
+    sourceAcrName: sdshmctspublic.azurecr.io
+    targetResourceGroupName: rpe-acr-prod-rg
+    targetAcrName: hmctsprod.azurecr.io
+    sourceServiceConnection: DTS-SHAREDSERVICES-PROD
+    targetServiceConnection: DCD-CNP-PROD
+    storageContainerName: sdshmctspublic
+    prefix: prodsds
+  ${{ if and(eq(parameters.environment, 'sbox'), eq(parameters.platform, 'cft')) }}:
+    sourceResourceGroupName: cnp-acr-rg
+    sourceAcrName: hmctssandbox.azurecr.io
+    targetResourceGroupName: cnp-acr-rg
+    targetAcrName: hmctssbox.azurecr.io
+    sourceServiceConnection: DCD-CFT-Sandbox
+    targetServiceConnection: DCD-CFT-Sandbox
+    storageContainerName: hmctssandbox
+    prefix: sboxcft
+  ${{ if and(eq(parameters.environment, 'sbox'), eq(parameters.platform, 'sds')) }}:
+    sourceResourceGroupName: sds-acr-rg
+    sourceAcrName: sdshmctspublicsbox.azurecr.io
+    targetResourceGroupName: cnp-acr-rg
+    targetAcrName: hmctssbox.azurecr.io
+    sourceServiceConnection: DTS-SHAREDSERVICES-SBOX
+    targetServiceConnection: DCD-CFT-Sandbox
+    storageContainerName: sdshmctspublicsbox
+    prefix: sboxsds
+  ${{ if eq(parameters.environment, 'prod') }}:
+    keyVaultName:
+    storageAccountName: acrmigration
+    exportPipelineName: acrExportPipeline
+    exportSecretName: acrmigrationsas
+    importPipelineName: acrImportPipeline
+    importSecretName: acrmigrationsas
+  ${{ if eq(parameters.environment, 'sbox') }}:
+    keyVaultName: cftsbox-intsvc
+    storageAccountName: acrmigration
+    exportPipelineName: acrExportPipeline
+    exportSecretName: acrmigrationsas
+    importPipelineName: acrImportPipeline
+    importSecretName: acrmigrationsas
+
+
+trigger: none
+pr: none
+
+jobs:
+  - job: FetchSecrets
+    displayName: 'Fetch secrets from Key Vault'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - task: AzureKeyVault@2
+        displayName: 'Get secrets from Key Vault'
+        inputs:
+          azureSubscription: DTS-CFTSBOX-INTSVC
+          keyVaultName: $(keyVaultName)
+          secretsFilter: 'acrmigrationsas, acrMigrationIdentity'
+
+  - job: BulkTransfer
+    displayName: 'Bulk ACR Transfer - ${{ parameters.operation | upper }} ${{ parameters.mode | upper }}'
+    pool:
+      vmImage: 'ubuntu-latest'
+    dependsOn: FetchSecrets
+    variables:
+      ACR_MANAGED_IDENTITY: $(acrMigrationIdentity)
+    steps:
+      - checkout: self
+
+      - task: AzureCLI@2
+        displayName: 'Install acrtransfer CLI extension'
+        inputs:
+          azureSubscription: "$(targetServiceConnection)"
+          scriptType: bash
+          scriptLocation: inlineScript
+          inlineScript: |
+            az extension add --name acrtransfer
+
+      # ExportPipeline creation
+      - ${{ if and(eq(parameters.operation, 'export'), eq(parameters.mode, 'create')) }}:
+        - task: AzureCLI@2
+          displayName: 'Create ExportPipeline'
+          env:
+            ACR_MANAGED_IDENTITY: $(ACR_MANAGED_IDENTITY)
+          inputs:
+            azureSubscription: "$(sourceServiceConnection)"
+            scriptType: bash
+            scriptLocation: inlineScript
+            inlineScript: |
+              az acr export-pipeline create \
+                --resource-group "$(sourceResourceGroupName)" \
+                --registry "$(sourceAcrName)" \
+                --name "$(exportPipelineName)" \
+                --secret-uri "https://$(sourceKeyVaultName).vault.azure.net/secrets/$(exportSecretName)" \
+                --storage-container-uri "https://$(storageAccountName).blob.core.windows.net/$(storageContainerName)" \
+                --assign-identity "$ACR_MANAGED_IDENTITY" \
+                --options ContinueOnErrors
+
+      # ExportPipeline batch migrate
+      - ${{ if and(eq(parameters.operation, 'export'), eq(parameters.mode, 'migrate')) }}:
+        - task: AzureCLI@2
+          displayName: 'Run Batch Export Script'
+          inputs:
+            azureSubscription: "$(sourceServiceConnection)"
+            scriptType: bash
+            scriptLocation: inlineScript
+            workingDirectory: $(System.DefaultWorkingDirectory)
+            inlineScript: |
+              python3 bulk-transfer/batch_export.py \
+                --resource-group $(sourceResourceGroupName) \
+                --acr-name $(sourceAcrName) \
+                --pipeline-name $(exportPipelineName) \
+                --batch-size 50 \
+                --prefix exportbatch \
+                ${{ if eq(parameters.dryRun, true) }}
+                --dry-run
+                ${{ end }}
+
+      # ImportPipeline creation
+      - ${{ if and(eq(parameters.operation, 'import'), eq(parameters.mode, 'create')) }}:
+        - task: AzureCLI@2
+          displayName: 'Create ImportPipeline'
+          env:
+            ACR_MANAGED_IDENTITY: $(acrMigrationIdentity)
+          inputs:
+            azureSubscription: "$(targetServiceConnection)"
+            scriptType: bash
+            scriptLocation: inlineScript
+            inlineScript: |
+              az acr import-pipeline create \
+                --resource-group "$(targetResourceGroupName)" \
+                --registry "$(targetAcrName)" \
+                --name "$(importPipelineName)" \
+                --secret-uri "https://$(keyVaultName).vault.azure.net/secrets/$(importSecretName)" \
+                --storage-container-uri "https://$(storageAccountName).blob.core.windows.net/$(storageContainerName)" \
+                --assign-identity "$ACR_MANAGED_IDENTITY" \
+                --options ContinueOnErrors OverwriteTags
+                --source-trigger-enabled False
+
+      # ImportPipeline batch migrate
+      - ${{ if and(eq(parameters.operation, 'import'), eq(parameters.mode, 'migrate')) }}:
+        - task: AzureCLI@2
+          displayName: 'Run Batch Import Script'
+          env:
+            ACR_SAS_TOKEN: $(acrmigrationsas)
+          inputs:
+            azureSubscription: "$(targetServiceConnection)"
+            scriptType: bash
+            scriptLocation: inlineScript
+            workingDirectory: $(System.DefaultWorkingDirectory)
+            inlineScript: |
+              python3 bulk-transfer/batch_import.py \
+                --resource-group $(targetResourceGroupName) \
+                --acr-name $(targetAcrName) \
+                --pipeline-name $(importPipelineName) \
+                --storage-account $(storageAccountName) \
+                --container $(storageContainerName) \
+                --sas-token $(ACR_SAS_TOKEN) \
+                --prefix $(prefix) \
+                ${{ if eq(parameters.dryRun, true) }}
+                --dry-run
+                ${{ end }}
+
