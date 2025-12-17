@@ -263,13 +263,29 @@ def _import_artifact(context: TransferContext, repository: str, tag: str) -> Non
     except AzCliError as error:
         # Only retry if force_on_retry is enabled and not already using --force
         if context.force_on_retry and not context.force:
-            # Check for 409 Conflict or phantom tag error
-            err = (error.stderr or "").lower() + (error.stdout or "").lower()
-            if ("409" in err and "already exists" in err) or ("tag already exists" in err) or ("manifest unknown" in err) or ("manifest does not exist" in err):
-                _log(f"Retrying {repository}:{tag} with --force due to conflict or phantom tag error.", "yellow")
-                args.append("--force")
-                _run_az(args)
+            err = f"{error.stderr or ''}\n{error.stdout or ''}".lower()
+            # Match common conflict/phantom tag errors
+            conflict_patterns = [
+                "409",
+                "already exists",
+                "tag already exists",
+                "manifest unknown",
+                "manifest does not exist",
+                "code: conflict",
+                "error: (conflict)",
+            ]
+            if any(pat in err for pat in conflict_patterns):
+                _log(f"[force-on-retry] Retrying {repository}:{tag} with --force due to conflict or phantom tag error.\nError was: {error}", "yellow")
+                # Ensure --force is not duplicated
+                if "--force" not in args:
+                    args.append("--force")
+                try:
+                    _run_az(args)
+                except AzCliError as retry_error:
+                    _log(f"[force-on-retry] Retry with --force failed for {repository}:{tag}: {retry_error}", "red")
+                    raise retry_error
             else:
+                _log(f"[force-on-retry] Not retrying {repository}:{tag}: error did not match conflict/phantom tag patterns.", "magenta")
                 raise
         else:
             raise
