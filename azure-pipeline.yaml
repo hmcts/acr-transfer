@@ -126,7 +126,7 @@ stages:
                   "--target-subscription-id" "$(targetServiceConnection)"
                   "--max-repositories" "${{ parameters.maxRepositories }}"
                   "--delay-seconds" "${{ parameters.delaySeconds }}"
-                  "---parallel-imports" "${{ parameters.parallelImports }}"
+                  "--parallel-imports" "${{ parameters.parallelImports }}"
                 )
 
                 if [ "${{ parameters.ignorePattern }}" != "__unset__" ]; then
