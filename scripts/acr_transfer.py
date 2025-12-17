@@ -69,6 +69,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Overwrite existing tags in the target registry when duplicates are encountered.",
     )
     parser.add_argument(
+        "--force-on-retry",
+        action="store_true",
+        help="On import failure due to tag conflict, retry with --force for that tag only.",
+    )
+    parser.add_argument(
         "--parallel-imports",
         type=int,
         default=2,
@@ -127,6 +132,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         source_login=(source_login_server, source_resource_id),
         dry_run=args.dry_run,
         force=args.force,
+        force_on_retry=getattr(args, "force_on_retry", False),
         delay=args.delay_seconds,
         target_subscription_id=args.target_subscription_id,
     )

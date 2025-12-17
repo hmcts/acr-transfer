@@ -60,8 +60,9 @@ class TransferContext:
     source_login: str  # This will be the resource ID
     dry_run: bool
     force: bool
-    delay: float
-    target_subscription_id: str
+    force_on_retry: bool = False
+    delay: float = 0.0
+    target_subscription_id: str = ""
 
 def _resolve_login_server(registry_name: str) -> str:
         login_server = _run_az([
@@ -257,7 +258,21 @@ def _import_artifact(context: TransferContext, repository: str, tag: str) -> Non
     ]
     if context.force:
         args.append("--force")
-    _run_az(args)
+    try:
+        _run_az(args)
+    except AzCliError as error:
+        # Only retry if force_on_retry is enabled and not already using --force
+        if context.force_on_retry and not context.force:
+            # Check for 409 Conflict or phantom tag error
+            err = (error.stderr or "").lower() + (error.stdout or "").lower()
+            if ("409" in err and "already exists" in err) or ("tag already exists" in err) or ("manifest unknown" in err) or ("manifest does not exist" in err):
+                _log(f"Retrying {repository}:{tag} with --force due to conflict or phantom tag error.", "yellow")
+                args.append("--force")
+                _run_az(args)
+            else:
+                raise
+        else:
+            raise
 
 def perform_transfer(
     context: TransferContext,

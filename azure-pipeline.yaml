@@ -50,6 +50,10 @@ parameters:
     displayName: Overwrite - Force overwrite of existing tags in target registry
     type: boolean
     default: false
+  - name: forceOverwriteOnErrorOnly
+    displayName: Overwrite on Error - Force overwrite of existing tags in target registry only on error
+    type: boolean
+    default: false
   - name: ignorePattern
     displayName: Optional ignore pattern(s) (comma-separated or repeated)
     type: string
@@ -61,6 +65,10 @@ parameters:
   - name: pipelineTimeout
     type: number
     default: 120
+  - name: parallelImports
+    displayName: Number of parallel imports to run
+    type: number
+    default: 1
 
 variables:
   ${{ if and(eq(parameters.environment, 'prod'), eq(parameters.platform, 'cft'), eq(parameters.state, 'public')) }}:
@@ -118,6 +126,7 @@ stages:
                   "--target-subscription-id" "$(targetServiceConnection)"
                   "--max-repositories" "${{ parameters.maxRepositories }}"
                   "--delay-seconds" "${{ parameters.delaySeconds }}"
+                  "---parallel-imports" "${{ parameters.parallelImports }}"
                 )
 
                 if [ "${{ parameters.ignorePattern }}" != "__unset__" ]; then
@@ -137,6 +146,10 @@ stages:
 
                 if [ "${{ parameters.forceOverwrite }}" = "true" ] || [ "${{ parameters.forceOverwrite }}" = "True" ]; then
                   args+=("--force")
+                fi
+
+                if [ "${{ parameters.forceOverwriteOnErrorOnly }}" = "true" ]; then
+                  args+=("--force-on-retry")
                 fi
 
                 if [ "${{ parameters.dryRun }}" = "true" ] || [ "${{ parameters.dryRun }}" = "True" ]; then
