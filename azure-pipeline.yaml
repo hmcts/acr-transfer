@@ -148,7 +148,7 @@ stages:
                   args+=("--force")
                 fi
 
-                if [ "${{ parameters.forceOverwriteOnErrorOnly }}" = "true" ]; then
+                if [ "${{ parameters.forceOverwriteOnErrorOnly }}" = "true" ] || [ "${{ parameters.forceOverwriteOnErrorOnly }}" = "True" ]; then
                   args+=("--force-on-retry")
                 fi
 
