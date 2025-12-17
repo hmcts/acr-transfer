@@ -174,25 +174,36 @@ def main():
     args = parser.parse_args()
 
     ignore_tags = set()
+    ignore_repos = set()
     if args.ignore_tags:
         try:
             with open(args.ignore_tags, "r", encoding="utf-8") as f:
                 ignore_list = json.load(f)
             for entry in ignore_list:
                 repo = entry.get("repository")
-                tag = entry.get("tag")
-                if repo and tag:
+                tag = entry.get("tag", None)
+                # If only repo is specified, ignore all tags in that repo
+                if repo and (tag is None or tag == ""):
+                    ignore_repos.add(repo)
+                elif repo and tag:
                     ignore_tags.add((repo, tag))
         except Exception as e:
             print(f"Warning: Could not load ignore-tags file: {e}", file=sys.stderr)
 
     all_artifacts = get_all_artifacts(args.acr_name)
     print(f"Found {len(all_artifacts)} artifacts.")
-    # Filter out ignored tags
-    if ignore_tags:
+    # Filter out ignored tags and repos
+    if ignore_tags or ignore_repos:
         before = len(all_artifacts)
-        all_artifacts = [a for a in all_artifacts if tuple(a.split(":", 1)) not in ignore_tags]
-        print(f"Filtered out {before - len(all_artifacts)} artifacts using ignore-tags.")
+        def not_ignored(artifact):
+            repo, tag = artifact.split(":", 1)
+            if repo in ignore_repos:
+                return False
+            if (repo, tag) in ignore_tags:
+                return False
+            return True
+        all_artifacts = [a for a in all_artifacts if not_ignored(a)]
+        print(f"Filtered out {before - len(all_artifacts)} artifacts using ignore-tags and ignore-repos.")
     all_artifacts.sort()  # Always sort for repeatable batches
     batches = split_batches(all_artifacts, args.batch_size)
     print(f"Splitting into {len(batches)} batches of up to {args.batch_size}.")
@@ -205,7 +216,7 @@ def main():
     any_batch_failed = False
     triggered_runs = []  # Track pipeline run names we've triggered
     create_processes = {}  # Track az command processes: {run_name: process}
-    
+
     for i, batch in enumerate(batches, 1):
         run_name = f"{args.prefix}{i:03d}"
         if run_name in existing_runs:
@@ -229,7 +240,7 @@ def main():
             triggered_runs.append(run_name)
         # Small delay to avoid overwhelming the API
         time.sleep(2)
-    
+
     # Wait for all az command processes to complete (just the command, not the pipeline execution)
     if create_processes:
         print(f"\nWaiting for all {len(create_processes)} 'az' commands to complete...")
@@ -241,7 +252,7 @@ def main():
                 triggered_runs.remove(run_name)
             else:
                 print(f"  {run_name} creation command completed.")
-    
+
     # Wait for all triggered pipeline runs to complete in Azure
     if triggered_runs and not args.dry_run:
         print(f"\nAll {len(triggered_runs)} batches triggered. Waiting for Azure pipelines to complete...")
@@ -258,18 +269,18 @@ def main():
             try:
                 output = run_cli(cmd)
                 all_runs = json.loads(output)
-                
+
                 # Filter to only our triggered runs
                 our_runs = [r for r in all_runs if r.get("name") in triggered_runs]
-                
+
                 # Count by status
                 pending = sum(1 for r in our_runs if r.get("provisioningState") in ["Running", "Creating", "Pending", "Updating"])
                 succeeded = sum(1 for r in our_runs if r.get("provisioningState") == "Succeeded")
                 failed = sum(1 for r in our_runs if r.get("provisioningState") == "Failed")
                 canceled = sum(1 for r in our_runs if r.get("provisioningState") == "Canceled")
-                
+
                 print(f"  Status: {pending} running, {succeeded} succeeded, {failed} failed, {canceled} canceled (total: {len(our_runs)}/{len(triggered_runs)})")
-                
+
                 if pending == 0:
                     # All done
                     print(f"\nAll pipeline runs completed!")
@@ -285,7 +296,7 @@ def main():
             except Exception as e:
                 print(f"  Error checking pipeline status: {e}", file=sys.stderr)
                 time.sleep(poll_interval)
-    
+
     if any_batch_failed:
         print("\nSome batches failed. See errors above.", file=sys.stderr)
         sys.exit(1)
