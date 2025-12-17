@@ -261,8 +261,11 @@ def _import_artifact(context: TransferContext, repository: str, tag: str) -> Non
     try:
         _run_az(args)
     except AzCliError as error:
+        _log(f"[debug] Import failed for {repository}:{tag}. context.force={context.force}, context.force_on_retry={context.force_on_retry}", "magenta")
+        _log(f"[debug] Error text: {error.stderr or ''}\n{error.stdout or ''}", "magenta")
         # Only retry if force_on_retry is enabled and not already using --force
         if context.force_on_retry and not context.force:
+            _log(f"[debug] Considering force-on-retry for {repository}:{tag}", "magenta")
             err = f"{error.stderr or ''}\n{error.stdout or ''}".lower()
             # Match common conflict/phantom tag errors
             conflict_patterns = [
@@ -288,6 +291,7 @@ def _import_artifact(context: TransferContext, repository: str, tag: str) -> Non
                 _log(f"[force-on-retry] Not retrying {repository}:{tag}: error did not match conflict/phantom tag patterns.", "magenta")
                 raise
         else:
+            _log(f"[debug] Not retrying {repository}:{tag}: force_on_retry={context.force_on_retry}, force={context.force}", "magenta")
             raise
 
 def perform_transfer(
