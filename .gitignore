@@ -70,5 +70,5 @@ coverage.xml
 # Jupyter
 .ipynb_checkpoints/
 
-# Ignore file for tags to be ignored during bulk transfer
-bulk-transfer/ignore-tags.json
+# Build Transfers
+bulk-transfer/*.json
