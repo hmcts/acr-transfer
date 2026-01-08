@@ -68,6 +68,17 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Overwrite existing tags in the target registry when duplicates are encountered.",
     )
+    parser.add_argument(
+        "--force-on-retry",
+        action="store_true",
+        help="On import failure due to tag conflict, retry with --force for that tag only.",
+    )
+    parser.add_argument(
+        "--parallel-imports",
+        type=int,
+        default=2,
+        help="Number of parallel imports to run (default: 1, i.e., sequential). Use with caution.",
+    )
     return parser.parse_args(argv)
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
@@ -121,6 +132,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         source_login=(source_login_server, source_resource_id),
         dry_run=args.dry_run,
         force=args.force,
+        force_on_retry=getattr(args, "force_on_retry", False),
         delay=args.delay_seconds,
         target_subscription_id=args.target_subscription_id,
     )
@@ -151,6 +163,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             tags_to_process = [tag for tag in tags if tag not in target_tag_set]
         scheduled_repos = [args.repository] if tags_to_process else []
     else:
+        import concurrent.futures
         try:
             all_repositories = _list_repositories(args.source_registry_name)
         except AzCliError as error:
@@ -169,7 +182,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         scheduled_repos = []
         skipped_no_tags = []
         skipped_all_tags_present = []
-        for repo in repositories:
+
+        def fetch_tags_for_repo(repo):
             try:
                 tags = _list_tags(args.source_registry_name, repo)
             except AzCliError:
@@ -182,6 +196,24 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     target_tags = []
                 else:
                     target_tags = []
+            return repo, tags, target_tags
+
+        _log(f"Fetching tags for {len(repositories)} repositories in parallel...", "bold")
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+            future_to_repo = {executor.submit(fetch_tags_for_repo, repo): repo for repo in repositories}
+            for idx, future in enumerate(concurrent.futures.as_completed(future_to_repo), 1):
+                repo = future_to_repo[future]
+                try:
+                    repo, tags, target_tags = future.result()
+                except Exception as exc:
+                    _log(f"[ERROR] Exception fetching tags for {repo}: {exc}", "red")
+                    tags, target_tags = [], []
+                results.append((repo, tags, target_tags))
+                if idx % 25 == 0 or idx == len(repositories):
+                    _log(f"Processed {idx}/{len(repositories)} repositories...")
+
+        for repo, tags, target_tags in results:
             target_tag_set = set(target_tags)
             if not tags:
                 skipped_no_tags.append(repo)
@@ -236,7 +268,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     _log("===============================", "cyan")
     _log("=== Beginning transfer loop ===", "bold")
     _log("===============================", "cyan")
-    perform_transfer(context, scheduled_repos, max_repositories=args.max_repositories)
+    perform_transfer(
+        context,
+        scheduled_repos,
+        max_repositories=args.max_repositories,
+        parallel_imports=args.parallel_imports,
+    )
 
 if __name__ == "__main__":
     main()
