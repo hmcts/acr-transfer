@@ -4,6 +4,32 @@
 
 `acr_transfer.py` is a Python utility to copy repositories, container images, and Helm charts between Azure Container Registries (ACR). It supports filtering, dry-run, force overwrite, and advanced ignore patterns (including regex).
 
+### Key Features
+
+- **Digest-Based Verification**: Compares manifest digests (SHA256 hashes) to ensure artifacts are identical, not just tag names
+- **Re-tag Detection**: Automatically detects when tags have been re-pointed to different images
+- **Smart Migration**: Only transfers tags that are missing or have different underlying images
+- **Cross-Subscription Support**: Migrate between ACRs in different Azure subscriptions
+- **Parallel Imports**: Speed up transfers with concurrent import operations
+- **Flexible Filtering**: Filter by repository name patterns, letters, or regex
+
+### How Artifact Comparison Works
+
+The utility performs **digest-based comparison** rather than simple tag name matching:
+
+1. **Fetches Manifest Digests**: For each repository, retrieves the SHA256 digest for every tag in both source and target registries
+2. **Compares Digests**: A tag is migrated if:
+   - The tag doesn't exist in the target registry, OR
+   - The tag exists but points to a different manifest digest (re-tagged image)
+3. **Skips Identical Artifacts**: Tags with matching digests are skipped (already synchronized)
+
+**Example Scenarios:**
+- Source has `myapp:1.0.0` → `sha256:abc123`, Target has `myapp:1.0.0` → `sha256:abc123` ✅ **Skipped** (identical)
+- Source has `myapp:1.0.0` → `sha256:abc123`, Target has `myapp:1.0.0` → `sha256:def456` ⚠️ **Migrated** (re-tagged)
+- Source has `myapp:2.0.0` → `sha256:xyz789`, Target doesn't have `myapp:2.0.0` ⬆️ **Migrated** (new tag)
+
+This ensures you're migrating the **actual image content**, not just tag labels.
+
 ## Prerequisites
 
 - Python 3.8+
@@ -37,7 +63,17 @@ python3 scripts/acr_transfer.py \
 - `--max-repositories`: Limit the number of repositories processed in this run.
 - `--delay-seconds`: Delay (in seconds) between imports to avoid overloading the service.
 - `--dry-run`: Report planned actions without importing artifacts.
-- `--force`: Overwrite existing tags in the target registry.
+- `--force`: Overwrite existing tags in the target registry, even if digests match.
+
+### Force Mode Behavior
+
+- **Without `--force`**: Only migrates tags that are missing or have different digests (smart sync)
+- **With `--force`**: Migrates ALL tags from source to target, overwriting even if digests are identical
+
+Use `--force` when:
+- You want to ensure all tags are re-imported regardless of content
+- Target registry may have corrupted manifests
+- You need to reset target registry to exactly match source
 
 ## Ignore Patterns
 
@@ -183,6 +219,20 @@ az role assignment create --assignee <IDENTITY_OBJECT_ID> --role "Key Vault Secr
 - Use `--dry-run` to preview actions before actual migration.
 
 ## Troubleshooting
+
+### Digest Comparison Issues
+
+**"Detected re-tagged artifacts" warning:**
+- This means a tag exists in both registries but points to different images
+- The tag will be migrated to update the target registry
+- This is normal if someone deleted and re-pushed a tag with the same name
+
+**Tags not migrating as expected:**
+- Check that digests actually differ: Use `az acr repository show-manifests --name <registry> --repository <repo>`
+- Ensure you have permissions to read manifests from both registries
+- Verify subscription IDs are correct for cross-subscription scenarios
+
+### General Troubleshooting
 
 - If a repo is not ignored as expected, check pattern syntax and ensure `--ignore-config` is supplied.
 - For advanced filtering, use regex patterns.

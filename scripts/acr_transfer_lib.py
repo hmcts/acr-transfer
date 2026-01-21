@@ -224,6 +224,50 @@ def _list_tags(registry: str, repository: str, subscription: str = "") -> List[s
     tags = _run_az(args, expect_json=True)
     return sorted(list(tags))
 
+def _list_manifests_with_digests(registry: str, repository: str, subscription: str = "") -> dict:
+    """
+    Get all manifests with their digests for a repository.
+    
+    Returns a dict mapping tag names to their manifest digests.
+    Example: {"1.0.0": "sha256:abc123...", "latest": "sha256:abc123..."}
+    """
+    args = [
+        "acr",
+        "repository",
+        "show-manifests",
+        "--name",
+        registry,
+        "--repository",
+        repository,
+        "--output",
+        "json",
+    ]
+    if subscription:
+        args.extend(["--subscription", subscription])
+    
+    try:
+        manifests = _run_az(args, expect_json=True)
+    except AzCliError as error:
+        # If repository doesn't exist, return empty dict
+        stderr_lower = error.stderr.lower()
+        if "repositorynotfound" in stderr_lower or "not found" in stderr_lower:
+            return {}
+        raise
+    
+    # Build mapping of tag -> digest
+    tag_digest_map = {}
+    if isinstance(manifests, list):
+        for manifest in manifests:
+            if not isinstance(manifest, dict):
+                continue
+            digest = manifest.get("digest", "")
+            tags = manifest.get("tags")
+            if digest and tags and isinstance(tags, list):
+                for tag in tags:
+                    tag_digest_map[tag] = digest
+    
+    return tag_digest_map
+
 def _tag_has_manifest(registry: str, repository: str, tag: str) -> bool:
     """Return True if the tag has a valid manifest, False otherwise."""
     try:
@@ -326,30 +370,58 @@ def perform_transfer(
         _log(
             f"Processing repository '{repository}' ({repo_count}/{len(repositories)})", "cyan"
         )
+        
+        # Get source manifests with digests
         try:
-            tags = _list_tags(context.source_name, repository, context.source_subscription_id)
+            source_manifests = _list_manifests_with_digests(
+                context.source_name, repository, context.source_subscription_id
+            )
         except AzCliError as error:
-            _log(f"Failed to list tags for '{repository}': {error}")
-            total_failures.append(f"{repository}: tag listing failed")
+            _log(f"Failed to list manifests for '{repository}': {error}")
+            total_failures.append(f"{repository}: manifest listing failed")
             continue
-        if not tags:
+        
+        if not source_manifests:
             _log(f"No tags found for '{repository}'. Skipping.")
             continue
+        
+        # Get target manifests with digests
         try:
-            target_tags = _list_tags(context.target_name, repository, context.target_subscription_id)
+            target_manifests = _list_manifests_with_digests(
+                context.target_name, repository, context.target_subscription_id
+            )
         except AzCliError as error:
-            stderr_lower = error.stderr.lower()
-            if "repositorynotfound" in stderr_lower or "not found" in stderr_lower:
-                target_tags = []
-            else:
-                _log(f"Failed to inspect target registry for '{repository}': {error}")
-                total_failures.append(f"{repository}: target inspection failed")
-                continue
-        target_tag_set = set(target_tags)
+            _log(f"Failed to inspect target registry for '{repository}': {error}")
+            total_failures.append(f"{repository}: target inspection failed")
+            continue
+        
+        # Determine tags to process based on digest comparison
         if context.force:
-            tags_to_process = list(tags)
+            # Force mode: migrate all tags regardless of digest
+            tags_to_process = list(source_manifests.keys())
         else:
-            tags_to_process = [tag for tag in tags if tag not in target_tag_set]
+            # Compare digests: migrate if tag missing OR digest differs
+            tags_to_process = []
+            retagged_tags = []
+            
+            for tag, source_digest in source_manifests.items():
+                if tag not in target_manifests:
+                    # Tag doesn't exist in target
+                    tags_to_process.append(tag)
+                elif target_manifests[tag] != source_digest:
+                    # Tag exists but points to different digest (re-tagged)
+                    tags_to_process.append(tag)
+                    retagged_tags.append(tag)
+            
+            # Report re-tagged artifacts
+            if retagged_tags:
+                display = ", ".join(retagged_tags[:3])
+                suffix = "" if len(retagged_tags) <= 3 else ", ..."
+                _log(
+                    f"Detected {len(retagged_tags)} re-tagged artifact(s) for '{repository}': {display}{suffix}",
+                    "yellow"
+                )
+        
         # Sort tags for deterministic order
         tags_to_process = sorted(tags_to_process)
         if not tags_to_process:
@@ -358,12 +430,14 @@ def perform_transfer(
             continue
         acted_repos += 1
         if not context.force:
-            skipped_tags = [tag for tag in tags if tag not in tags_to_process]
+            # Report skipped tags (tags with matching digests)
+            all_source_tags = set(source_manifests.keys())
+            skipped_tags = sorted(all_source_tags - set(tags_to_process))
             if skipped_tags:
                 display = ", ".join(skipped_tags[:3])
                 suffix = "" if len(skipped_tags) <= 3 else ", ..."
                 _log(
-                    f"Skipping {len(skipped_tags)} existing tag(s) for '{repository}': {display}{suffix}"
+                    f"Skipping {len(skipped_tags)} tag(s) with matching digest(s) for '{repository}': {display}{suffix}"
                 )
         # Prepare import jobs
         def import_job(tag):
