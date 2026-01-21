@@ -62,6 +62,7 @@ class TransferContext:
     force: bool
     force_on_retry: bool = False
     delay: float = 0.0
+    source_subscription_id: str = ""
     target_subscription_id: str = ""
 
 def _resolve_login_server(registry_name: str) -> str:
@@ -191,8 +192,8 @@ def _load_ignore_patterns_from_file(path: Optional[str]) -> List[str]:
         )
     return _normalize_ignore_patterns(candidates)
 
-def _list_repositories(source_registry: str) -> List[str]:
-    repos = _run_az([
+def _list_repositories(source_registry: str, subscription: str = "") -> List[str]:
+    args = [
         "acr",
         "repository",
         "list",
@@ -200,11 +201,14 @@ def _list_repositories(source_registry: str) -> List[str]:
         source_registry,
         "--output",
         "json",
-    ], expect_json=True)
+    ]
+    if subscription:
+        args.extend(["--subscription", subscription])
+    repos = _run_az(args, expect_json=True)
     return list(repos)
 
-def _list_tags(registry: str, repository: str) -> List[str]:
-    tags = _run_az([
+def _list_tags(registry: str, repository: str, subscription: str = "") -> List[str]:
+    args = [
         "acr",
         "repository",
         "show-tags",
@@ -214,7 +218,10 @@ def _list_tags(registry: str, repository: str) -> List[str]:
         repository,
         "--output",
         "json",
-    ], expect_json=True)
+    ]
+    if subscription:
+        args.extend(["--subscription", subscription])
+    tags = _run_az(args, expect_json=True)
     return sorted(list(tags))
 
 def _tag_has_manifest(registry: str, repository: str, tag: str) -> bool:
@@ -320,7 +327,7 @@ def perform_transfer(
             f"Processing repository '{repository}' ({repo_count}/{len(repositories)})", "cyan"
         )
         try:
-            tags = _list_tags(context.source_name, repository)
+            tags = _list_tags(context.source_name, repository, context.source_subscription_id)
         except AzCliError as error:
             _log(f"Failed to list tags for '{repository}': {error}")
             total_failures.append(f"{repository}: tag listing failed")
@@ -329,7 +336,7 @@ def perform_transfer(
             _log(f"No tags found for '{repository}'. Skipping.")
             continue
         try:
-            target_tags = _list_tags(context.target_name, repository)
+            target_tags = _list_tags(context.target_name, repository, context.target_subscription_id)
         except AzCliError as error:
             stderr_lower = error.stderr.lower()
             if "repositorynotfound" in stderr_lower or "not found" in stderr_lower:

@@ -134,6 +134,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         force=args.force,
         force_on_retry=getattr(args, "force_on_retry", False),
         delay=args.delay_seconds,
+        source_subscription_id=args.source_subscription_id,
         target_subscription_id=args.target_subscription_id,
     )
 
@@ -143,12 +144,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         _log(f"Single repository specified: {args.repository}")
         # Debug output removed
         try:
-            tags = _list_tags(args.source_registry_name, args.repository)
+            tags = _list_tags(args.source_registry_name, args.repository, args.source_subscription_id)
         except AzCliError as error:
             _log(f"[ERROR] Failed to list tags for '{args.repository}' in source: {error}", "red")
             tags = []
         try:
-            target_tags = _list_tags(args.target_registry_name, args.repository)
+            target_tags = _list_tags(args.target_registry_name, args.repository, args.target_subscription_id)
         except AzCliError as error:
             stderr_lower = str(error.stderr).lower()
             if "repositorynotfound" in stderr_lower or "not found" in stderr_lower:
@@ -165,7 +166,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     else:
         import concurrent.futures
         try:
-            all_repositories = _list_repositories(args.source_registry_name)
+            all_repositories = _list_repositories(args.source_registry_name, args.source_subscription_id)
         except AzCliError as error:
             _log(f"Failed to list repositories: {error}")
             sys.exit(1)
@@ -182,21 +183,57 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         scheduled_repos = []
         skipped_no_tags = []
         skipped_all_tags_present = []
+        failed_repos = []
+
+        def fetch_tags_with_retry(registry, repo, subscription, max_retries=3, delay=2.0):
+            """Fetch tags with retry logic for transient failures."""
+            import time
+            last_error = None
+            for attempt in range(max_retries):
+                try:
+                    return _list_tags(registry, repo, subscription)
+                except AzCliError as error:
+                    last_error = error
+                    stderr_lower = str(error.stderr).lower()
+                    # Don't retry for "not found" errors - repo genuinely doesn't exist
+                    if "repositorynotfound" in stderr_lower or "not found" in stderr_lower:
+                        raise
+                    # For other errors, retry with backoff
+                    if attempt < max_retries - 1:
+                        wait_time = delay * (2 ** attempt)  # exponential backoff
+                        time.sleep(wait_time)
+            # All retries exhausted
+            raise last_error
 
         def fetch_tags_for_repo(repo):
+            tags = None
+            target_tags = None
+            source_error = None
+            target_error = None
+            
             try:
-                tags = _list_tags(args.source_registry_name, repo)
-            except AzCliError:
-                tags = []
-            try:
-                target_tags = _list_tags(args.target_registry_name, repo)
+                tags = fetch_tags_with_retry(args.source_registry_name, repo, args.source_subscription_id)
             except AzCliError as error:
+                source_error = error
+                stderr_lower = str(error.stderr).lower()
+                if "repositorynotfound" in stderr_lower or "not found" in stderr_lower:
+                    tags = []
+                else:
+                    _log(f"[WARN] Failed to list tags for '{repo}' in source after retries: {error}", "yellow")
+                    tags = None  # Mark as failed, not empty
+            
+            try:
+                target_tags = fetch_tags_with_retry(args.target_registry_name, repo, args.target_subscription_id)
+            except AzCliError as error:
+                target_error = error
                 stderr_lower = str(error.stderr).lower()
                 if "repositorynotfound" in stderr_lower or "not found" in stderr_lower:
                     target_tags = []
                 else:
+                    _log(f"[WARN] Failed to list tags for '{repo}' in target after retries: {error}", "yellow")
                     target_tags = []
-            return repo, tags, target_tags
+            
+            return repo, tags, target_tags, source_error
 
         _log(f"Fetching tags for {len(repositories)} repositories in parallel...", "bold")
         results = []
@@ -205,15 +242,19 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             for idx, future in enumerate(concurrent.futures.as_completed(future_to_repo), 1):
                 repo = future_to_repo[future]
                 try:
-                    repo, tags, target_tags = future.result()
+                    repo, tags, target_tags, source_error = future.result()
                 except Exception as exc:
                     _log(f"[ERROR] Exception fetching tags for {repo}: {exc}", "red")
-                    tags, target_tags = [], []
-                results.append((repo, tags, target_tags))
+                    tags, target_tags, source_error = None, [], exc
+                results.append((repo, tags, target_tags, source_error))
                 if idx % 25 == 0 or idx == len(repositories):
                     _log(f"Processed {idx}/{len(repositories)} repositories...")
 
-        for repo, tags, target_tags in results:
+        for repo, tags, target_tags, source_error in results:
+            # Handle failed tag fetches (tags is None when fetch failed)
+            if tags is None:
+                failed_repos.append((repo, source_error))
+                continue
             target_tag_set = set(target_tags)
             if not tags:
                 skipped_no_tags.append(repo)
@@ -243,6 +284,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             preview_items = sorted(ignored_repositories)[:preview_window]
             formatted_preview = "\n  - ".join(preview_items)
             _log(f"Ignored {len(ignored_repositories)} repository(ies) matching patterns:\n  - {formatted_preview}", "dim")
+        if failed_repos:
+            preview_window = min(len(failed_repos), 10)
+            preview_items = [f"{repo}: {err}" for repo, err in sorted(failed_repos, key=lambda x: x[0])[:preview_window]]
+            formatted_preview = "\n  - ".join(preview_items)
+            _log(f"FAILED to fetch tags for {len(failed_repos)} repository(ies) - will retry on next run:\n  - {formatted_preview}", "red")
         if skipped_no_tags:
             preview_window = min(len(skipped_no_tags), 10)
             preview_items = sorted(skipped_no_tags)[:preview_window]
@@ -256,7 +302,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         if scheduled_repos:
             formatted_list = "\n  - ".join(scheduled_repos)
             _log(f"Repositories scheduled for this run (limit {args.max_repositories}):\n  - {formatted_list}", "green")
-            remaining = len(repositories) - len(scheduled_repos) - len(skipped_no_tags) - len(skipped_all_tags_present)
+            remaining = len(repositories) - len(scheduled_repos) - len(skipped_no_tags) - len(skipped_all_tags_present) - len(failed_repos)
             if remaining > 0:
                 _log(f"{remaining} additional repositories remain matching the filter.", "cyan")
         else:
