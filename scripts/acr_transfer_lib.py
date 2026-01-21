@@ -62,6 +62,7 @@ class TransferContext:
     force: bool
     force_on_retry: bool = False
     delay: float = 0.0
+    source_subscription_id: str = ""
     target_subscription_id: str = ""
 
 def _resolve_login_server(registry_name: str) -> str:
@@ -191,7 +192,9 @@ def _load_ignore_patterns_from_file(path: Optional[str]) -> List[str]:
         )
     return _normalize_ignore_patterns(candidates)
 
-def _list_repositories(source_registry: str) -> List[str]:
+def _list_repositories(source_registry: str, subscription_id: str) -> List[str]:
+    # Set subscription context before listing repositories
+    _run_az(["account", "set", "--subscription", subscription_id])
     repos = _run_az([
         "acr",
         "repository",
@@ -203,7 +206,9 @@ def _list_repositories(source_registry: str) -> List[str]:
     ], expect_json=True)
     return list(repos)
 
-def _list_tags(registry: str, repository: str) -> List[str]:
+def _list_tags(registry: str, repository: str, subscription_id: str) -> List[str]:
+    # Set subscription context before listing tags
+    _run_az(["account", "set", "--subscription", subscription_id])
     tags = _run_az([
         "acr",
         "repository",
@@ -320,7 +325,7 @@ def perform_transfer(
             f"Processing repository '{repository}' ({repo_count}/{len(repositories)})", "cyan"
         )
         try:
-            tags = _list_tags(context.source_name, repository)
+            tags = _list_tags(context.source_name, repository, context.source_subscription_id)
         except AzCliError as error:
             _log(f"Failed to list tags for '{repository}': {error}")
             total_failures.append(f"{repository}: tag listing failed")
@@ -329,7 +334,7 @@ def perform_transfer(
             _log(f"No tags found for '{repository}'. Skipping.")
             continue
         try:
-            target_tags = _list_tags(context.target_name, repository)
+            target_tags = _list_tags(context.target_name, repository, context.target_subscription_id)
         except AzCliError as error:
             stderr_lower = error.stderr.lower()
             if "repositorynotfound" in stderr_lower or "not found" in stderr_lower:

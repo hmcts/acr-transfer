@@ -134,6 +134,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         force=args.force,
         force_on_retry=getattr(args, "force_on_retry", False),
         delay=args.delay_seconds,
+        source_subscription_id=args.source_subscription_id,
         target_subscription_id=args.target_subscription_id,
     )
 
@@ -143,12 +144,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         _log(f"Single repository specified: {args.repository}")
         # Debug output removed
         try:
-            tags = _list_tags(args.source_registry_name, args.repository)
+            tags = _list_tags(args.source_registry_name, args.repository, args.source_subscription_id)
         except AzCliError as error:
             _log(f"[ERROR] Failed to list tags for '{args.repository}' in source: {error}", "red")
             tags = []
         try:
-            target_tags = _list_tags(args.target_registry_name, args.repository)
+            target_tags = _list_tags(args.target_registry_name, args.repository, args.target_subscription_id)
         except AzCliError as error:
             stderr_lower = str(error.stderr).lower()
             if "repositorynotfound" in stderr_lower or "not found" in stderr_lower:
@@ -165,7 +166,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     else:
         import concurrent.futures
         try:
-            all_repositories = _list_repositories(args.source_registry_name)
+            all_repositories = _list_repositories(args.source_registry_name, args.source_subscription_id)
         except AzCliError as error:
             _log(f"Failed to list repositories: {error}")
             sys.exit(1)
@@ -185,11 +186,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
         def fetch_tags_for_repo(repo):
             try:
-                tags = _list_tags(args.source_registry_name, repo)
+                tags = _list_tags(args.source_registry_name, repo, args.source_subscription_id)
             except AzCliError:
                 tags = []
             try:
-                target_tags = _list_tags(args.target_registry_name, repo)
+                target_tags = _list_tags(args.target_registry_name, repo, args.target_subscription_id)
             except AzCliError as error:
                 stderr_lower = str(error.stderr).lower()
                 if "repositorynotfound" in stderr_lower or "not found" in stderr_lower:
